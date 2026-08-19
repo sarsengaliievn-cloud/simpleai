@@ -1,0 +1,20 @@
+-- Второй контур изоляции: Row Level Security на уровне Postgres.
+-- Подключается в спринте 1 вместе с обёрткой, которая на каждый запрос
+-- выставляет app.company_id внутри транзакции.
+-- ДО этого момента файл не применяется — единственная защита сейчас
+-- это forCompany() в packages/db/src/tenant.ts.
+
+-- Пример для одной таблицы, остальные по тому же шаблону:
+--
+-- ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+-- ALTER TABLE customers FORCE ROW LEVEL SECURITY;
+--
+-- CREATE POLICY tenant_isolation ON customers
+--   USING ("companyId" = current_setting('app.company_id', true)::uuid)
+--   WITH CHECK ("companyId" = current_setting('app.company_id', true)::uuid);
+--
+-- Колонки в БД в camelCase и требуют двойных кавычек: Prisma не переименовывает
+-- поля, только таблицы через @@map.
+--
+-- Важно: приложение должно ходить в БД под ролью БЕЗ права BYPASSRLS,
+-- а миграции — под отдельной ролью-владельцем.

@@ -1,0 +1,448 @@
+// Схема ядра: спринты 0–3.
+// Knowledge Base, Products, Leads, Automations, Billing добавляются позже —
+// но companyId и правила изоляции у них будут ровно такие же.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, vector]
+}
+
+// ─────────────────────────────────────────────
+// Пользователи и доступ
+// ─────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String
+  firstName     String
+  lastName      String
+  phone         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  memberships   Membership[]
+  sessions      Session[]
+  auditLogs     AuditLog[]
+  assignedConversations Conversation[] @relation("ConversationAssignee")
+  authoredMessages      Message[]      @relation("MessageAuthor")
+
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  sessionToken String   @unique
+  expiresAt    DateTime
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// Токены для подтверждения email и сброса пароля. Хранится только хеш.
+model VerificationToken {
+  id        String                @id @default(uuid()) @db.Uuid
+  identifier String
+  tokenHash String                @unique
+  type      VerificationTokenType
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime              @default(now())
+
+  @@index([identifier, type])
+  @@map("verification_tokens")
+}
+
+enum VerificationTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+// ─────────────────────────────────────────────
+// Арендатор
+// ─────────────────────────────────────────────
+
+model Company {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String   @unique
+  industry    String?
+  country     String?
+  city        String?
+  website     String?
+  description String?
+  timezone    String   @default("Asia/Almaty")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships       Membership[]
+  customers         Customer[]
+  conversations     Conversation[]
+  messages          Message[]
+  whatsappAccounts  WhatsAppAccount[]
+  whatsappNumbers   WhatsAppPhoneNumber[]
+  webhookEvents     WebhookEvent[]
+  auditLogs         AuditLog[]
+  aiConfiguration   AIConfiguration?
+  knowledgeDocuments KnowledgeDocument[]
+  knowledgeChunks    KnowledgeChunk[]
+
+  @@map("companies")
+}
+
+model Membership {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  companyId String   @db.Uuid
+  role      Role
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyId])
+  @@index([companyId])
+  @@map("memberships")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  OPERATOR
+  ANALYST
+}
+
+// ─────────────────────────────────────────────
+// WhatsApp
+// ─────────────────────────────────────────────
+
+model WhatsAppAccount {
+  id           String            @id @default(uuid()) @db.Uuid
+  companyId    String            @db.Uuid
+  wabaId       String
+  businessName String?
+  /// Шифруется на уровне приложения. В сыром виде в БД не попадает никогда.
+  accessToken  String
+  tokenExpiresAt DateTime?
+  connectedVia ConnectionMethod
+  status       IntegrationStatus @default(PENDING)
+  lastCheckedAt DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  company      Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  phoneNumbers WhatsAppPhoneNumber[]
+
+  @@unique([companyId, wabaId])
+  @@index([companyId])
+  @@map("whatsapp_accounts")
+}
+
+enum ConnectionMethod {
+  /// Клиент прошёл официальный флоу Meta внутри панели (нужен статус Tech Provider).
+  EMBEDDED_SIGNUP
+  /// Клиент сам создал WABA и передал Phone Number ID + токен.
+  MANUAL
+}
+
+enum IntegrationStatus {
+  PENDING
+  CONNECTED
+  ERROR
+  DISCONNECTED
+}
+
+model WhatsAppPhoneNumber {
+  id                 String   @id @default(uuid()) @db.Uuid
+  companyId          String   @db.Uuid
+  accountId          String   @db.Uuid
+  /// Phone Number ID из Meta — им адресуются все вызовы Cloud API.
+  phoneNumberId      String   @unique
+  displayPhoneNumber String
+  verifiedName       String?
+  qualityRating      String?
+  messagingLimit     String?
+  status             IntegrationStatus @default(PENDING)
+  webhookVerifiedAt  DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  account       WhatsAppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@index([companyId])
+  @@map("whatsapp_phone_numbers")
+}
+
+// ─────────────────────────────────────────────
+// Клиенты и переписка
+// ─────────────────────────────────────────────
+
+model Customer {
+  id             String   @id @default(uuid()) @db.Uuid
+  companyId      String   @db.Uuid
+  /// WhatsApp ID (номер в E.164 без +). Уникален в пределах компании.
+  waId           String
+  phone          String
+  name           String?
+  email          String?
+  city           String?
+  notes          String?
+  firstContactAt DateTime @default(now())
+  lastContactAt  DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([companyId, waId])
+  @@index([companyId, lastContactAt])
+  @@map("customers")
+}
+
+model Conversation {
+  id            String             @id @default(uuid()) @db.Uuid
+  companyId     String             @db.Uuid
+  customerId    String             @db.Uuid
+  phoneNumberId String?            @db.Uuid
+  status        ConversationStatus @default(OPEN)
+  /// AI отвечает автоматически, HUMAN — менеджер нажал «Take over».
+  mode          ConversationMode   @default(AI)
+  assigneeId    String?            @db.Uuid
+  lastMessageAt DateTime           @default(now())
+  /// Конец 24-часового окна обслуживания Meta. После него свободный текст
+  /// отправить нельзя — только утверждённый шаблон.
+  windowExpiresAt DateTime?
+  unreadCount   Int                @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  company     Company              @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer    Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  phoneNumber WhatsAppPhoneNumber? @relation(fields: [phoneNumberId], references: [id])
+  assignee    User?                @relation("ConversationAssignee", fields: [assigneeId], references: [id])
+  messages    Message[]
+
+  @@index([companyId, status, lastMessageAt])
+  @@index([companyId, customerId])
+  @@map("conversations")
+}
+
+enum ConversationStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+enum ConversationMode {
+  AI
+  HUMAN
+}
+
+model Message {
+  id             String        @id @default(uuid()) @db.Uuid
+  companyId      String        @db.Uuid
+  conversationId String        @db.Uuid
+  direction      MessageDirection
+  type           MessageType   @default(TEXT)
+  authorType     AuthorType
+  authorUserId   String?       @db.Uuid
+  text           String?
+  /// Для аудио/фото/документов. Голосовые в Казахстане — не редкий случай,
+  /// поэтому поле есть с самого начала, транскрибация добавится позже.
+  mediaUrl       String?
+  mediaMimeType  String?
+  /// ID сообщения на стороне Meta. Используется для дедупликации вебхуков.
+  providerMessageId String?
+  status         MessageStatus @default(PENDING)
+  errorCode      String?
+  sentAt         DateTime?
+  createdAt      DateTime      @default(now())
+  metadata       Json?
+
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author       User?        @relation("MessageAuthor", fields: [authorUserId], references: [id])
+
+  @@unique([companyId, providerMessageId])
+  @@index([companyId, conversationId, createdAt])
+  @@map("messages")
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  VIDEO
+  DOCUMENT
+  LOCATION
+  TEMPLATE
+  UNSUPPORTED
+}
+
+enum AuthorType {
+  CUSTOMER
+  AI
+  MANAGER
+  SYSTEM
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// ─────────────────────────────────────────────
+// Инфраструктура
+// ─────────────────────────────────────────────
+
+/// Сырое событие вебхука. Пишется до обработки: даёт дедупликацию,
+/// повтор при падении воркера и разбор инцидентов постфактум.
+model WebhookEvent {
+  id            String             @id @default(uuid()) @db.Uuid
+  companyId     String?            @db.Uuid
+  source        String             @default("whatsapp")
+  /// Ключ дедупликации: обычно message id из payload.
+  externalId    String             @unique
+  payload       Json
+  status        WebhookEventStatus @default(RECEIVED)
+  attempts      Int                @default(0)
+  lastError     String?
+  receivedAt    DateTime           @default(now())
+  processedAt   DateTime?
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([status, receivedAt])
+  @@map("webhook_events")
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  actorUserId String?  @db.Uuid
+  action      String
+  entityType  String?
+  entityId    String?
+  metadata    Json?
+  ip          String?
+  createdAt   DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  actor   User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────────
+// Ассистент и база знаний (спринты 4–5)
+// ─────────────────────────────────────────────
+
+model AIConfiguration {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @unique @db.Uuid
+
+  enabled   Boolean  @default(false)
+  model     String   @default("claude-sonnet-4-6")
+  role      String   @default("Консультант компании")
+  goals     String[] @default([])
+  tone      String   @default("Дружелюбный")
+  languages String[] @default(["ru"])
+  /// Что ассистенту запрещено — попадает в системную инструкцию дословно.
+  forbidden String   @default("")
+  /// Свободные правила от пользователя.
+  extraRules String  @default("")
+  /// Ниже этого значения ответ не отправляется, диалог уходит менеджеру.
+  confidenceThreshold Int @default(70)
+  /// Если true — системная инструкция берётся из advancedPrompt как есть.
+  advancedMode   Boolean @default(false)
+  advancedPrompt String  @default("")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("ai_configurations")
+}
+
+model KnowledgeDocument {
+  id        String         @id @default(uuid()) @db.Uuid
+  companyId String         @db.Uuid
+  title     String
+  /// Источник: имя файла или "ручной ввод".
+  source    String
+  mimeType  String?
+  sizeBytes Int            @default(0)
+  status    IngestStatus   @default(PENDING)
+  error     String?
+  chunkCount Int           @default(0)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  company Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  chunks  KnowledgeChunk[]
+
+  @@index([companyId, createdAt])
+  @@map("knowledge_documents")
+}
+
+enum IngestStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+/// Эмбеддинг лежит в колонке embedding vector(1536), которую Prisma не умеет
+/// читать. Запись и поиск идут сырым SQL в packages/db/src/vector.ts —
+/// там же вручную проставляется company_id, потому что tenant-расширение
+/// на $queryRaw не действует.
+model KnowledgeChunk {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @db.Uuid
+  documentId String   @db.Uuid
+  ordinal    Int
+  content    String
+  tokens     Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, documentId])
+  @@map("knowledge_chunks")
+}

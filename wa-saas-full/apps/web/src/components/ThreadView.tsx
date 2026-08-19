@@ -1,0 +1,153 @@
+'use client';
+
+import { useState, useTransition, useEffect, useRef } from 'react';
+import { sendMessage, takeOver, returnToAi, markRead } from '@/app/conversations/actions';
+import { initials, avatarColor, clock } from '@/lib/format';
+
+type Message = {
+  id: string;
+  direction: 'INBOUND' | 'OUTBOUND';
+  authorType: 'CUSTOMER' | 'AI' | 'MANAGER' | 'SYSTEM';
+  text: string | null;
+  type: string;
+  createdAt: Date;
+};
+
+type Conversation = {
+  id: string;
+  mode: 'AI' | 'HUMAN';
+  windowOpen: boolean;
+  windowExpiresAt: Date | null;
+  customerName: string;
+  customerPhone: string;
+  customerCity: string | null;
+};
+
+const AUTHOR: Record<string, string> = { AI: 'Ассистент', MANAGER: 'Менеджер' };
+
+export function ThreadView({
+  conversation,
+  messages,
+}: {
+  conversation: Conversation;
+  messages: Message[];
+}) {
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const bottom = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void markRead(conversation.id);
+  }, [conversation.id]);
+
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length]);
+
+  const submit = () => {
+    if (!text.trim() || pending) return;
+    const body = text;
+    setText('');
+    setError(null);
+    start(async () => {
+      const result = await sendMessage(conversation.id, body);
+      if (!result.ok) {
+        setError(result.error);
+        setText(body);
+      }
+    });
+  };
+
+  return (
+    <div className="thread">
+      <div className="thread-h spread">
+        <div className="row">
+          <div className="avatar" style={{ background: avatarColor(conversation.id) }}>
+            {initials(conversation.customerName, '??')}
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14.5 }}>{conversation.customerName}</div>
+            <div className="tiny muted">
+              {conversation.customerPhone}
+              {conversation.customerCity ? ` · ${conversation.customerCity}` : ''}
+            </div>
+          </div>
+        </div>
+        <div className="row">
+          {conversation.mode === 'AI' ? (
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={pending}
+              onClick={() => start(() => takeOver(conversation.id))}
+            >
+              Забрать диалог
+            </button>
+          ) : (
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={pending}
+              onClick={() => start(() => returnToAi(conversation.id))}
+            >
+              Вернуть ассистенту
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="thread-b">
+        {messages.map((m) =>
+          m.authorType === 'SYSTEM' ? (
+            <div key={m.id} className="tiny muted" style={{ textAlign: 'center', padding: '6px 0' }}>
+              {m.text}
+            </div>
+          ) : (
+            <div key={m.id} className={`msg ${m.direction === 'INBOUND' ? 'msg-in' : 'msg-out'}`}>
+              {m.text ?? <em className="small">Вложение: {m.type.toLowerCase()}</em>}
+              <span className="msg-t">
+                {clock(m.createdAt)}
+                {AUTHOR[m.authorType] ? ` · ${AUTHOR[m.authorType]}` : ''}
+              </span>
+            </div>
+          ),
+        )}
+        <div ref={bottom} />
+      </div>
+
+      <div className="thread-f">
+        {error && (
+          <div className="chip chip-bad" style={{ marginBottom: 9, height: 'auto', padding: '6px 10px' }}>
+            {error}
+          </div>
+        )}
+        <div className="row">
+          <input
+            className="input"
+            placeholder={conversation.windowOpen ? 'Написать сообщение…' : 'Окно закрыто — нужен шаблон'}
+            value={text}
+            disabled={!conversation.windowOpen || pending}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={submit}
+            disabled={!conversation.windowOpen || pending || !text.trim()}
+          >
+            {pending ? 'Отправляю…' : 'Отправить'}
+          </button>
+        </div>
+        <div className="tiny muted" style={{ marginTop: 7 }}>
+          {conversation.windowOpen
+            ? `Окно 24 часа открыто до ${conversation.windowExpiresAt ? clock(conversation.windowExpiresAt) : '—'}.`
+            : 'Прошло больше 24 часов с последнего сообщения клиента. Свободный текст Meta не примет — только утверждённый шаблон.'}
+        </div>
+      </div>
+    </div>
+  );
+}

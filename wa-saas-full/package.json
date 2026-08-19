@@ -1,0 +1,17 @@
+{
+  "name": "wa-saas",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "build": "pnpm --filter \"./apps/*\" build",
+    "db:generate": "pnpm --filter @wa/db generate",
+    "db:migrate": "pnpm --filter @wa/db migrate",
+    "db:seed": "pnpm --filter @wa/db seed",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,1428 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Simple — AI-ассистент для WhatsApp</title>
+<meta name="description" content="Ассистент отвечает клиентам в WhatsApp: наличие, цена, доставка. Сложное передаёт менеджеру. Официальное подключение через Meta.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#FBFBF9; --surface:#FFFFFF; --surface-2:#F5F5F2;
+  --ink:#12161C; --ink-2:#3A4048; --muted:#6E7278;
+  --line:#E7E7E2; --line-2:#D8D8D2;
+  --pine:#0B6E4F; --pine-600:#095B41; --pine-soft:#EAF3EF;
+  --amber:#B4690E; --amber-soft:#FBF1E3;
+  --red:#B42318; --red-soft:#FCEEEC;
+  --blue:#1B4B7A; --blue-soft:#EAF0F6;
+  --r:12px; --r-sm:8px; --r-lg:18px;
+  --sh:0 1px 2px rgba(18,22,28,.04), 0 1px 3px rgba(18,22,28,.06);
+  --sh-lg:0 8px 30px rgba(18,22,28,.08);
+}
+[data-theme="dark"]{
+  --paper:#0E1116; --surface:#151A21; --surface-2:#1B2129;
+  --ink:#F2F3F0; --ink-2:#C7CBD1; --muted:#8B9099;
+  --line:#242B34; --line-2:#2F3742;
+  --pine:#3FA37D; --pine-600:#4FB88F; --pine-soft:#12241D;
+  --amber:#D79A4B; --amber-soft:#2A1F10;
+  --red:#E0685C; --red-soft:#2A1512;
+  --blue:#7FB2E0; --blue-soft:#111C28;
+  --sh:0 1px 2px rgba(0,0,0,.4); --sh-lg:0 8px 30px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:'Manrope',system-ui,-apple-system,sans-serif;
+  background:var(--paper); color:var(--ink);
+  font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+a{color:inherit;text-decoration:none}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:none}
+::selection{background:var(--pine);color:#fff}
+:focus-visible{outline:2px solid var(--pine);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.86em;letter-spacing:-.02em}
+.display{font-family:'Unbounded',sans-serif;font-weight:500;letter-spacing:-.03em;line-height:1.1}
+
+/* ── СИГНАТУРА: нить диалога ─────────────────────────────── */
+.rail{position:relative;padding-left:34px}
+.rail::before{content:'';position:absolute;left:9px;top:6px;bottom:6px;width:1px;background:var(--line-2)}
+.rail-item{position:relative;padding-bottom:26px}
+.rail-item::before{
+  content:'';position:absolute;left:-30px;top:7px;width:9px;height:9px;border-radius:50%;
+  background:var(--paper);border:1.5px solid var(--line-2);
+}
+.rail-item.on::before{background:var(--pine);border-color:var(--pine);box-shadow:0 0 0 4px var(--pine-soft)}
+.rail-item:last-child{padding-bottom:0}
+
+/* ── Атомы ────────────────────────────────────────────────── */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  height:40px;padding:0 18px;border-radius:var(--r-sm);
+  font-weight:600;font-size:14px;letter-spacing:-.01em;
+  border:1px solid transparent;transition:.15s;white-space:nowrap;
+}
+.btn-primary{background:var(--pine);color:#fff}
+.btn-primary:hover{background:var(--pine-600)}
+.btn-ghost{background:var(--surface);border-color:var(--line-2);color:var(--ink)}
+.btn-ghost:hover{border-color:var(--muted)}
+.btn-quiet{color:var(--muted);padding:0 10px}
+.btn-quiet:hover{color:var(--ink);background:var(--surface-2)}
+.btn-sm{height:32px;padding:0 12px;font-size:13px}
+.btn-lg{height:48px;padding:0 26px;font-size:15px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh)}
+.card-p{padding:20px}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 9px;
+  border-radius:999px;font-size:12px;font-weight:600;letter-spacing:-.01em;
+  background:var(--surface-2);color:var(--ink-2);border:1px solid var(--line);
+}
+.chip-ok{background:var(--pine-soft);color:var(--pine-600);border-color:transparent}
+.chip-warn{background:var(--amber-soft);color:var(--amber);border-color:transparent}
+.chip-bad{background:var(--red-soft);color:var(--red);border-color:transparent}
+.chip-info{background:var(--blue-soft);color:var(--blue);border-color:transparent}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+
+.field{display:block;margin-bottom:16px}
+.label{display:block;font-size:13px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.hint{font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.45}
+.input,.select,.textarea{
+  width:100%;height:42px;padding:0 13px;background:var(--surface);
+  border:1px solid var(--line-2);border-radius:var(--r-sm);transition:.15s;font-size:14.5px;
+}
+.textarea{height:auto;padding:11px 13px;resize:vertical;min-height:88px;line-height:1.5}
+.input:focus,.select:focus,.textarea:focus{outline:none;border-color:var(--pine);box-shadow:0 0 0 3px var(--pine-soft)}
+.select{appearance:none;background-image:url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' stroke='%236E7278' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 13px center;padding-right:34px}
+
+.switch{position:relative;width:40px;height:23px;border-radius:999px;background:var(--line-2);transition:.18s;flex:none}
+.switch.on{background:var(--pine)}
+.switch::after{content:'';position:absolute;top:2.5px;left:2.5px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.18s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.switch.on::after{transform:translateX(17px)}
+
+.avatar{
+  width:36px;height:36px;border-radius:50%;flex:none;display:grid;place-items:center;
+  font-size:13px;font-weight:700;color:#fff;letter-spacing:-.02em;
+}
+.grid{display:grid;gap:16px}
+.row{display:flex;align-items:center;gap:10px}
+.spread{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.tiny{font-size:12px}
+.stack{display:flex;flex-direction:column}
+.hide{display:none!important}
+</style>
+<style>
+/* ── Публичный сайт ───────────────────────────────────────── */
+.pub{max-width:1120px;margin:0 auto;padding:0 24px}
+.nav{
+  position:sticky;top:0;z-index:60;background:rgba(251,251,249,.88);
+  backdrop-filter:blur(12px);border-bottom:1px solid var(--line);
+}
+.nav-in{display:flex;align-items:center;justify-content:space-between;height:66px}
+.logo{display:flex;align-items:center;gap:9px;font-family:'Unbounded',sans-serif;font-weight:600;font-size:17px;letter-spacing:-.04em}
+.logo-mark{width:26px;height:26px;border-radius:7px;background:var(--pine);display:grid;place-items:center;flex:none}
+.nav-links{display:flex;gap:26px;font-size:14px;font-weight:500;color:var(--ink-2)}
+.nav-links a:hover{color:var(--pine)}
+
+.hero{padding:88px 0 76px;position:relative;overflow:hidden}
+.hero h1{font-size:clamp(34px,5.4vw,60px);max-width:16ch}
+.hero .lede{font-size:clamp(16px,2vw,19px);color:var(--ink-2);max-width:52ch;margin:24px 0 34px;line-height:1.6}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--pine);margin-bottom:22px;
+}
+.hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+
+/* демо-нить входящего диалога — «герой» страницы */
+.thread-demo{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--sh-lg);overflow:hidden}
+.thread-demo-top{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+.thread-demo-body{padding:20px;display:flex;flex-direction:column;gap:12px;min-height:290px}
+.bub{max-width:80%;padding:10px 14px;border-radius:14px;font-size:14.5px;line-height:1.5;animation:pop .4s both}
+.bub-in{background:var(--surface-2);border-bottom-left-radius:4px;align-self:flex-start}
+.bub-out{background:var(--pine);color:#fff;border-bottom-right-radius:4px;align-self:flex-end}
+.bub-meta{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);align-self:flex-end;margin-top:-6px}
+@keyframes pop{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+.sec{padding:80px 0;border-top:1px solid var(--line)}
+.sec-head{max-width:56ch;margin-bottom:44px}
+.sec-head h2{font-size:clamp(25px,3.4vw,36px);font-family:'Unbounded',sans-serif;font-weight:500;letter-spacing:-.035em;line-height:1.2}
+.sec-head p{color:var(--ink-2);margin-top:14px;font-size:16.5px}
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.feat{padding:24px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.feat h3{font-size:16px;font-weight:700;margin-bottom:8px;letter-spacing:-.015em}
+.feat p{font-size:14px;color:var(--muted);line-height:1.6}
+.feat-ic{width:34px;height:34px;border-radius:9px;background:var(--pine-soft);display:grid;place-items:center;margin-bottom:14px;color:var(--pine)}
+
+.pipe{display:grid;grid-template-columns:1fr 1fr;gap:56px;align-items:start}
+.pipe-step h4{font-size:15px;font-weight:700;letter-spacing:-.015em}
+.pipe-step p{font-size:14px;color:var(--muted);margin-top:4px}
+
+.price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;align-items:start}
+.price{padding:26px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.price.hl{border-color:var(--pine);box-shadow:0 0 0 3px var(--pine-soft)}
+.price-amt{font-family:'Unbounded',sans-serif;font-size:32px;font-weight:500;letter-spacing:-.04em;margin:14px 0 4px}
+.price ul{list-style:none;margin:20px 0;display:flex;flex-direction:column;gap:10px}
+.price li{font-size:14px;display:flex;gap:9px;align-items:flex-start;color:var(--ink-2)}
+.price li svg{flex:none;margin-top:3px;color:var(--pine)}
+
+.faq-item{border-bottom:1px solid var(--line);padding:20px 0}
+.faq-q{display:flex;justify-content:space-between;gap:20px;width:100%;text-align:left;font-weight:600;font-size:15.5px;letter-spacing:-.01em}
+.faq-a{font-size:14.5px;color:var(--muted);line-height:1.65;padding-top:12px;max-width:75ch}
+
+.foot{border-top:1px solid var(--line);padding:40px 0;color:var(--muted);font-size:13.5px}
+
+/* ── Экраны входа / регистрации ───────────────────────────── */
+.auth{min-height:100vh;display:grid;place-items:center;padding:32px 20px}
+.auth-card{width:100%;max-width:420px}
+.auth-card h1{font-size:25px;font-family:'Unbounded',sans-serif;font-weight:500;letter-spacing:-.035em;margin-bottom:6px}
+
+/* ── Онбординг ────────────────────────────────────────────── */
+.onb{min-height:100vh;display:grid;grid-template-columns:290px 1fr}
+.onb-side{background:var(--surface);border-right:1px solid var(--line);padding:32px 28px}
+.onb-main{padding:52px 40px;overflow-y:auto}
+.onb-body{max-width:600px}
+.onb-body h1{font-size:27px;font-family:'Unbounded',sans-serif;font-weight:500;letter-spacing:-.035em;margin-bottom:8px}
+
+/* ── Оболочка приложения ──────────────────────────────────── */
+.shell{display:grid;grid-template-columns:246px 1fr;min-height:100vh}
+.side{
+  background:var(--surface);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;position:sticky;top:0;height:100vh;
+}
+.side-top{padding:18px 18px 14px;border-bottom:1px solid var(--line)}
+.side-nav{flex:1;overflow-y:auto;padding:12px 10px}
+.nav-group{font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);padding:14px 10px 6px}
+.nav-i{
+  display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-sm);
+  font-size:14px;font-weight:500;color:var(--ink-2);transition:.12s;margin-bottom:1px;position:relative;
+}
+.nav-i:hover{background:var(--surface-2);color:var(--ink)}
+.nav-i.on{background:var(--pine-soft);color:var(--pine-600);font-weight:600}
+.nav-i.on::before{content:'';position:absolute;left:-10px;top:8px;bottom:8px;width:2.5px;border-radius:0 3px 3px 0;background:var(--pine)}
+.nav-i svg{flex:none;opacity:.85}
+.nav-badge{margin-left:auto;font-size:11px;font-weight:700;background:var(--pine);color:#fff;border-radius:999px;padding:1px 7px}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.top{
+  height:60px;border-bottom:1px solid var(--line);background:rgba(251,251,249,.9);
+  backdrop-filter:blur(10px);display:flex;align-items:center;gap:14px;padding:0 24px;
+  position:sticky;top:0;z-index:40;
+}
+.top h1{font-size:17px;font-weight:700;letter-spacing:-.02em}
+.page{padding:24px;flex:1;min-width:0}
+.page-narrow{max-width:840px}
+.burger{display:none}
+
+.demo-flag{
+  display:flex;align-items:center;gap:9px;padding:9px 14px;margin-bottom:18px;
+  background:var(--amber-soft);border:1px solid rgba(180,105,14,.22);
+  border-radius:var(--r-sm);font-size:13px;color:var(--amber);font-weight:500;
+}
+
+/* Метрики */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+.kpi{padding:16px 18px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.kpi-l{font-size:12.5px;color:var(--muted);font-weight:600;letter-spacing:-.005em}
+.kpi-v{font-family:'Unbounded',sans-serif;font-size:26px;font-weight:500;letter-spacing:-.04em;margin:7px 0 3px}
+.kpi-d{font-size:12px;font-weight:600}
+.up{color:var(--pine)} .down{color:var(--red)}
+
+table{width:100%;border-collapse:collapse}
+th{
+  text-align:left;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--muted);padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+td{padding:13px 14px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:middle}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--surface-2)}
+
+.empty{text-align:center;padding:56px 24px;max-width:420px;margin:0 auto}
+.empty-ic{width:52px;height:52px;border-radius:14px;background:var(--surface-2);display:grid;place-items:center;margin:0 auto 16px;color:var(--muted)}
+.empty h3{font-size:16.5px;font-weight:700;margin-bottom:7px;letter-spacing:-.015em}
+.empty p{font-size:14px;color:var(--muted);margin-bottom:18px;line-height:1.6}
+
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:22px;overflow-x:auto}
+.tab{padding:10px 14px;font-size:14px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tab.on{color:var(--pine-600);border-bottom-color:var(--pine)}
+
+/* Инбокс */
+.inbox{display:grid;grid-template-columns:312px 1fr 288px;height:calc(100vh - 60px)}
+.inbox-list{border-right:1px solid var(--line);display:flex;flex-direction:column;background:var(--surface);min-width:0}
+.inbox-filters{padding:12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.filter-row{display:flex;gap:5px;overflow-x:auto}
+.conv{display:flex;gap:11px;padding:13px 14px;border-bottom:1px solid var(--line);cursor:pointer;min-width:0}
+.conv:hover{background:var(--surface-2)}
+.conv.on{background:var(--pine-soft)}
+.conv-n{font-weight:600;font-size:14px;letter-spacing:-.01em}
+.conv-p{font-size:13px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.thread{display:flex;flex-direction:column;min-width:0;background:var(--paper)}
+.thread-h{padding:13px 18px;border-bottom:1px solid var(--line);background:var(--surface)}
+.thread-b{flex:1;overflow-y:auto;padding:22px 18px;display:flex;flex-direction:column;gap:11px}
+.thread-f{border-top:1px solid var(--line);padding:13px 18px;background:var(--surface)}
+.msg{max-width:74%;padding:9px 13px;border-radius:14px;font-size:14.5px;line-height:1.5;position:relative}
+.msg-in{background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:4px;align-self:flex-start}
+.msg-out{background:var(--pine);color:#fff;border-bottom-right-radius:4px;align-self:flex-end}
+.msg-t{font-size:11px;opacity:.62;margin-top:4px;display:block}
+.copilot{border:1px dashed var(--pine);background:var(--pine-soft);border-radius:var(--r);padding:13px;margin-top:10px}
+.ctx{border-left:1px solid var(--line);background:var(--surface);overflow-y:auto;padding:18px}
+.ctx-l{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 0 7px}
+
+/* Канбан */
+.kanban{display:flex;gap:14px;overflow-x:auto;padding-bottom:12px}
+.kan-col{min-width:262px;width:262px;flex:none}
+.kan-h{display:flex;align-items:center;gap:8px;padding:0 4px 11px;font-size:13px;font-weight:700;letter-spacing:-.01em}
+.kan-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:13px;margin-bottom:9px;box-shadow:var(--sh)}
+
+.split{display:grid;grid-template-columns:1fr 1fr;gap:0;height:calc(100vh - 60px)}
+.split-l{border-right:1px solid var(--line);overflow-y:auto;padding:22px;background:var(--surface)}
+.split-r{overflow-y:auto;display:flex;flex-direction:column}
+
+@media(max-width:1180px){
+  .inbox{grid-template-columns:290px 1fr}
+  .ctx{display:none}
+  .hero-grid,.pipe{grid-template-columns:1fr;gap:38px}
+  .feat-grid,.price-grid{grid-template-columns:repeat(2,1fr)}
+  .kpis{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:860px){
+  .shell{grid-template-columns:1fr}
+  .side{position:fixed;left:0;top:0;z-index:90;width:262px;transform:translateX(-100%);transition:.22s}
+  .side.open{transform:none;box-shadow:var(--sh-lg)}
+  .burger{display:grid;place-items:center;width:36px;height:36px;border-radius:var(--r-sm)}
+  .burger:hover{background:var(--surface-2)}
+  .nav-links{display:none}
+  .onb{grid-template-columns:1fr}
+  .onb-side{display:none}
+  .onb-main{padding:28px 20px}
+  .feat-grid,.price-grid,.kpis,.split{grid-template-columns:1fr}
+  .split{height:auto}
+  .split-l{border-right:none;border-bottom:1px solid var(--line)}
+  .inbox{grid-template-columns:1fr;height:auto}
+  .inbox-list{border-right:none;border-bottom:1px solid var(--line);max-height:44vh}
+  .thread-b{min-height:52vh}
+  .page{padding:18px 16px}
+  .sec{padding:56px 0}
+  .hero{padding:52px 0 44px}
+  .scrim{position:fixed;inset:0;background:rgba(18,22,28,.4);z-index:80}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* ═══════════════════════════════════════════════════════════
+   ДЕМО-ДАННЫЕ
+   Заменяются вызовами API — структура повторяет схему Prisma.
+   ═══════════════════════════════════════════════════════════ */
+const S = {
+  company:{name:'Demo Store', plan:'Рост', city:'Алматы'},
+  user:{name:'Нұржан Ахметов', role:'Владелец', initials:'НА'},
+  ai:{enabled:true, model:'claude-sonnet', tone:'Дружелюбный', langs:['Русский','Қазақша'], confidence:72},
+  wa:{connected:true, name:'Demo Store', number:'+7 707 512 44 90',
+      wabaId:'104857392018477', phoneId:'19283746501928', quality:'Высокое', limit:'1 000 / сутки', webhook:true},
+  kb:{docs:14, chunks:1284, updated:'сегодня, 09:14'},
+};
+
+const CUSTOMERS = [
+  {id:1,n:'Айгерим Смагулова',p:'+7 701 234 5678',c:'Алматы',tags:['Купил','VIP'],convs:6,orders:3,sum:'184 000 ₸',last:'12 мин',src:'WhatsApp'},
+  {id:2,n:'Данияр Ким',p:'+7 775 881 2043',c:'Астана',tags:['Горячий лид'],convs:2,orders:0,sum:'—',last:'34 мин',src:'WhatsApp'},
+  {id:3,n:'Мадина Оспанова',p:'+7 707 445 9012',c:'Шымкент',tags:['Новый клиент'],convs:1,orders:0,sum:'—',last:'1 ч',src:'WhatsApp'},
+  {id:4,n:'Ерлан Тлеубаев',p:'+7 747 320 7788',c:'Алматы',tags:['Купил','Повторный'],convs:9,orders:5,sum:'412 500 ₸',last:'3 ч',src:'WhatsApp'},
+  {id:5,n:'Алия Нурланова',p:'+7 702 119 6634',c:'Караганда',tags:['Требуется менеджер'],convs:3,orders:1,sum:'67 900 ₸',last:'5 ч',src:'WhatsApp'},
+  {id:6,n:'Тимур Сагинтаев',p:'+7 708 774 1250',c:'Актобе',tags:['Не купил'],convs:2,orders:0,sum:'—',last:'вчера',src:'WhatsApp'},
+];
+
+const CONVS = [
+  {id:1,cid:1,name:'Айгерим Смагулова',status:'ai',unread:2,time:'12 мин',
+   preview:'А есть такие же, но чёрные?',
+   msgs:[
+     {d:'in',t:'Здравствуйте! Кроссовки Nike Air Max 42 размер есть?',at:'14:02'},
+     {d:'out',by:'AI',t:'Здравствуйте, Айгерим! Да, Nike Air Max в 42 размере есть в наличии — 3 пары. Цена 47 900 ₸. Оформить доставку?',at:'14:02'},
+     {d:'in',t:'А есть такие же, но чёрные?',at:'14:14'},
+   ]},
+  {id:2,cid:2,name:'Данияр Ким',status:'human',unread:0,time:'34 мин',
+   preview:'Хочу поговорить с менеджером',
+   msgs:[
+     {d:'in',t:'Здравствуйте, доставка в Астану сколько идёт?',at:'13:20'},
+     {d:'out',by:'AI',t:'Здравствуйте! Доставка в Астану — 2–3 рабочих дня, стоимость 2 500 ₸. При заказе от 50 000 ₸ доставка бесплатная.',at:'13:21'},
+     {d:'in',t:'А если брак? Хочу поговорить с менеджером',at:'13:40'},
+     {d:'sys',t:'AI передал диалог менеджеру: клиент запросил человека',at:'13:40'},
+   ]},
+  {id:3,cid:3,name:'Мадина Оспанова',status:'new',unread:1,time:'1 ч',
+   preview:'Сәлеметсіз бе, дүкен қай жерде?',
+   msgs:[
+     {d:'in',t:'Сәлеметсіз бе, дүкен қай жерде орналасқан?',at:'12:55'},
+     {d:'out',by:'AI',t:'Сәлеметсіз бе! Дүкеніміз Алматы қаласында, Абай даңғылы 115. Жұмыс уақыты: 10:00–21:00, демалыссыз.',at:'12:55'},
+   ]},
+  {id:4,cid:5,name:'Алия Нурланова',status:'wait',unread:0,time:'5 ч',
+   preview:'Заказ пришёл не тот размер',
+   msgs:[
+     {d:'in',t:'Заказ пришёл, но размер не тот. Что делать?',at:'09:12'},
+     {d:'sys',t:'AI передал диалог менеджеру: жалоба',at:'09:12'},
+     {d:'out',by:'Менеджер',t:'Алия, здравствуйте. Извините за ситуацию — оформим обмен, курьер заберёт завтра.',at:'09:31'},
+   ]},
+  {id:5,cid:4,name:'Ерлан Тлеубаев',status:'closed',unread:0,time:'3 ч',
+   preview:'Спасибо, всё получил',
+   msgs:[
+     {d:'in',t:'Спасибо, всё получил 👍',at:'11:40'},
+     {d:'out',by:'AI',t:'Спасибо за заказ, Ерлан! Будем рады видеть вас снова.',at:'11:41'},
+   ]},
+];
+
+const PRODUCTS = [
+  {sku:'NK-AM-42',n:'Nike Air Max 90',cat:'Кроссовки',price:'47 900 ₸',old:'59 900 ₸',stock:3,sizes:'40–45',st:'Активен'},
+  {sku:'AD-SB-41',n:'Adidas Samba OG',cat:'Кроссовки',price:'41 500 ₸',old:'',stock:12,sizes:'38–44',st:'Активен'},
+  {sku:'PM-SD-39',n:'Puma Suede Classic',cat:'Кроссовки',price:'32 000 ₸',old:'',stock:0,sizes:'39–43',st:'Нет в наличии'},
+  {sku:'NB-530-43',n:'New Balance 530',cat:'Кроссовки',price:'54 700 ₸',old:'',stock:7,sizes:'40–46',st:'Активен'},
+  {sku:'CV-CT-38',n:'Converse Chuck 70',cat:'Кеды',price:'28 900 ₸',old:'34 900 ₸',stock:21,sizes:'36–44',st:'Активен'},
+];
+
+const KB_DOCS = [
+  {n:'Условия доставки и оплаты.pdf',t:'PDF',size:'240 КБ',chunks:38,st:'Проиндексирован',d:'14 авг'},
+  {n:'Каталог осень 2026.xlsx',t:'XLSX',size:'1,2 МБ',chunks:412,st:'Проиндексирован',d:'12 авг'},
+  {n:'Правила возврата.docx',t:'DOCX',size:'86 КБ',chunks:24,st:'Проиндексирован',d:'12 авг'},
+  {n:'Частые вопросы.txt',t:'TXT',size:'18 КБ',chunks:31,st:'Проиндексирован',d:'8 авг'},
+  {n:'Адреса магазинов.txt',t:'TXT',size:'4 КБ',chunks:6,st:'Индексируется',d:'сегодня'},
+];
+
+const LEADS = {
+  'Новый':[{n:'Данияр Ким',v:'≈ 48 000 ₸',t:'34 мин'},{n:'Мадина Оспанова',v:'—',t:'1 ч'}],
+  'Контакт установлен':[{n:'Тимур Сагинтаев',v:'≈ 32 000 ₸',t:'вчера'}],
+  'Интересуется':[{n:'Айгерим Смагулова',v:'≈ 47 900 ₸',t:'12 мин'},{n:'Асель Жумабаева',v:'≈ 88 000 ₸',t:'2 дня'}],
+  'Готов купить':[{n:'Нурлан Сериков',v:'≈ 54 700 ₸',t:'4 ч'}],
+  'Купил':[{n:'Ерлан Тлеубаев',v:'412 500 ₸',t:'3 ч'},{n:'Алия Нурланова',v:'67 900 ₸',t:'5 ч'}],
+  'Потерян':[{n:'Бахыт Оралов',v:'—',t:'3 дня'}],
+};
+
+const INTENTS = [
+  ['Узнать наличие',34],['Узнать цену',22],['Доставка',18],['Размеры',11],
+  ['Возврат',7],['Адрес магазина',5],['Оплата',3],
+];
+const LOST = [
+  ['Клиент перестал отвечать',31],['Высокая цена',24],['Нет нужного размера',19],
+  ['Долгая доставка',15],['Не устроил ответ',11],
+];
+const SERIES = [42,58,51,73,66,89,94,78,102,96,118,131,124,147];
+
+/* ═══════════════════════════════════════════════════════════
+   УТИЛИТЫ
+   ═══════════════════════════════════════════════════════════ */
+const $ = s => document.querySelector(s);
+const el = document.getElementById('app');
+const ic = (p,sz) => `<svg width="${sz||16}" height="${sz||16}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const I = {
+  home:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+  chat:'<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>',
+  users:'<circle cx="9" cy="8" r="3.2"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16.5 5.5a3.2 3.2 0 0 1 0 6"/><path d="M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
+  spark:'<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3"/>',
+  book:'<path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v18H6.5A2.5 2.5 0 0 0 4 22z"/><path d="M4 17.5A2.5 2.5 0 0 1 6.5 15H20"/>',
+  box:'<path d="M12 2.5 21 7v10l-9 4.5L3 17V7z"/><path d="M3 7l9 4.5L21 7"/><path d="M12 21.5v-10"/>',
+  chart:'<path d="M3 21h18"/><rect x="5" y="11" width="3.5" height="7"/><rect x="10.5" y="6" width="3.5" height="12"/><rect x="16" y="14" width="3.5" height="4"/>',
+  plug:'<path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v5"/>',
+  cog:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-2.7-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 15a2 2 0 1 1 0-4 1.6 1.6 0 0 0 1.1-2.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.6 1.6 0 0 0 9 4.6V4a2 2 0 1 1 4 0v.6a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.6 1.6 0 0 0 19.4 11a2 2 0 1 1 0 4z"/>',
+  card:'<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/>',
+  flow:'<rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="16" width="7" height="5" rx="1.5"/><path d="M6.5 8v6a4 4 0 0 0 4 4h3"/>',
+  kanban:'<rect x="3" y="4" width="5" height="14" rx="1.5"/><rect x="10" y="4" width="5" height="9" rx="1.5"/><rect x="17" y="4" width="4" height="12" rx="1.5"/>',
+  tag:'<path d="M12 2H2v10l10 10 10-10z"/><circle cx="7" cy="7" r="1.4"/>',
+  play:'<path d="M6 3.5 20 12 6 20.5z"/>',
+  wa:'<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/><path d="M8.6 9.4c.3 2.4 3.6 5.7 6 6l1.2-1.6-2-1-1 .9c-1-.5-2-1.5-2.5-2.5l.9-1-1-2z"/>',
+  shield:'<path d="M12 2.5 20 6v6c0 5-3.4 8.5-8 9.5-4.6-1-8-4.5-8-9.5V6z"/>',
+  ok:'<path d="M20 6 9 17l-5-5"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  bell:'<path d="M18 8.5a6 6 0 1 0-12 0c0 6-2.5 7.5-2.5 7.5h17S18 14.5 18 8.5z"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  up:'<path d="M12 19V5M5 12l7-7 7 7"/>',
+  menu:'<path d="M3 6h18M3 12h18M3 18h18"/>',
+  file:'<path d="M14 2H6.5A1.5 1.5 0 0 0 5 3.5v17A1.5 1.5 0 0 0 6.5 22h11a1.5 1.5 0 0 0 1.5-1.5V7z"/><path d="M14 2v5h5"/>',
+  send:'<path d="M21.5 2.5 2.5 11l8 2.5 2.5 8z"/>',
+  warn:'<path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17.5v.01"/>',
+};
+const av = (name,i) => {
+  const c=['#0B6E4F','#1B4B7A','#B4690E','#6B3FA0','#B42318','#0E7490'];
+  const k=name.split(' ').map(w=>w[0]).slice(0,2).join('');
+  return `<div class="avatar" style="background:${c[i%6]}">${k}</div>`;
+};
+const bars = (data,w,h) => {
+  const max=Math.max(...data), bw=w/data.length;
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px">` +
+    data.map((v,i)=>{const bh=(v/max)*(h-6);
+      return `<rect x="${i*bw+2}" y="${h-bh}" width="${bw-4}" height="${bh}" rx="2.5" fill="var(--pine)" opacity="${.35+.65*(v/max)}"/>`;}).join('') + `</svg>`;
+};
+const line = (data,w,h) => {
+  const max=Math.max(...data), min=Math.min(...data), sx=w/(data.length-1);
+  const pts=data.map((v,i)=>`${i*sx},${h-6-((v-min)/(max-min||1))*(h-16)}`).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px" preserveAspectRatio="none">
+    <polyline points="${pts}" fill="none" stroke="var(--pine)" stroke-width="2" stroke-linejoin="round"/>
+    <polygon points="0,${h} ${pts} ${w},${h}" fill="var(--pine)" opacity=".07"/></svg>`;
+};
+const rank = (rows,unit) => rows.map(([n,v])=>`
+  <div style="margin-bottom:13px">
+    <div class="spread" style="margin-bottom:5px"><span class="small">${n}</span><span class="small mono" style="font-weight:600">${v}${unit||'%'}</span></div>
+    <div style="height:5px;background:var(--surface-2);border-radius:3px;overflow:hidden">
+      <div style="height:100%;width:${v}%;background:var(--pine);border-radius:3px"></div></div>
+  </div>`).join('');
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════
+   ПУБЛИЧНАЯ ЧАСТЬ
+   ═══════════════════════════════════════════════════════════ */
+const navBar = () => `
+<header class="nav"><div class="pub nav-in">
+  <a href="#/" class="logo"><span class="logo-mark">${ic('<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z" fill="white" stroke="white"/>',15)}</span>Simple</a>
+  <nav class="nav-links">
+    <a href="#/#how">Как работает</a><a href="#/#feat">Возможности</a>
+    <a href="#/#price">Тарифы</a><a href="#/#faq">Вопросы</a>
+  </nav>
+  <div class="row">
+    <a href="#/login" class="btn btn-quiet">Войти</a>
+    <a href="https://wa.me/77089298041?text=%D0%97%D0%B4%D1%80%D0%B0%D0%B2%D1%81%D1%82%D0%B2%D1%83%D0%B9%D1%82%D0%B5!%20%D0%A5%D0%BE%D1%87%D1%83%20%D0%BF%D0%BE%D0%B4%D0%BA%D0%BB%D1%8E%D1%87%D0%B8%D1%82%D1%8C%20AI-%D0%B0%D1%81%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BD%D1%82%D0%B0" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Начать бесплатно</a>
+  </div>
+</div></header>`;
+
+function viewLanding(){
+  const steps=[
+    ['Клиент пишет в WhatsApp','Сообщение приходит на официальный номер компании через Meta Cloud API.'],
+    ['AI определяет намерение','Наличие, цена, доставка, возврат, жалоба — всего 11 типов запросов.'],
+    ['Поиск в базе знаний','Ответ собирается только из ваших документов и каталога, не из головы.'],
+    ['Проверка уверенности','Ниже порога — диалог уходит менеджеру, а не превращается в выдумку.'],
+    ['Ответ клиенту','Секунды вместо часов. История, клиент и лид сохраняются автоматически.'],
+  ];
+  const feats=[
+    ['book','База знаний','Загрузите прайс, условия доставки и правила возврата. AI отвечает по ним и ничего не придумывает.'],
+    ['chat','Общий инбокс','Вся переписка в одном окне. Менеджер в любой момент забирает диалог у AI одной кнопкой.'],
+    ['users','CRM без ручного ввода','Каждый написавший становится карточкой клиента с историей, тегами и суммой покупок.'],
+    ['chart','Аналитика','Сколько AI закрыл сам, где передал человека, о чём чаще спрашивают и почему не покупают.'],
+    ['spark','Подсказки менеджеру','Пока менеджер думает, AI уже предложил вариант ответа — отправить или поправить.'],
+    ['shield','Официальное подключение','Только WhatsApp Business Platform от Meta. Без серых схем и риска блокировки номера.'],
+  ];
+  const plans=[
+    ['Старт','19 900 ₸',['1 номер WhatsApp','1 000 AI-ответов в месяц','База знаний до 50 документов','2 сотрудника','Инбокс и CRM'],false],
+    ['Рост','49 900 ₸',['2 номера WhatsApp','5 000 AI-ответов в месяц','База знаний без ограничений','10 сотрудников','Автоматизации и подсказки','Расширенная аналитика'],true],
+    ['Бизнес','Договорная',['Номера без ограничений','Индивидуальный лимит ответов','API и вебхуки','Роли и права доступа','Приоритетная поддержка'],false],
+  ];
+  const faq=[
+    ['Не заблокируют ли номер?','Подключение идёт через WhatsApp Business Platform — официальный путь Meta. Мы не используем веб-сессии, QR-обходы и неофициальные библиотеки, из-за которых номера чаще всего и блокируют.'],
+    ['AI может выдумать ответ?','Он отвечает только из вашей базы знаний и каталога. Если данных нет или уверенность ниже порога, диалог уходит менеджеру — порог настраивается вами.'],
+    ['На каких языках отвечает?','Русский, казахский и английский, с автоматическим определением языка клиента. Один клиент может писать на казахском, другой на русском.'],
+    ['Что если клиент хочет человека?','Достаточно попросить менеджера — AI сразу передаст диалог и пришлёт уведомление. Менеджер также может забрать любой диалог сам.'],
+    ['Сколько занимает подключение?','Настройка ассистента и базы знаний — около часа. Подключение номера зависит от проверки бизнеса на стороне Meta, обычно несколько дней.'],
+  ];
+  return `${navBar()}
+<section class="hero"><div class="pub hero-grid">
+  <div>
+    <span class="eyebrow">${ic(I.spark,13)} WhatsApp Business Platform</span>
+    <h1 class="display">AI, который отвечает вашим клиентам в WhatsApp 24/7</h1>
+    <p class="lede">Подключите номер, загрузите информацию о бизнесе — и ассистент начнёт отвечать на вопросы о наличии, цене и доставке. Сложное передаст менеджеру.</p>
+    <div class="row" style="flex-wrap:wrap;gap:12px">
+      <a href="https://wa.me/77089298041?text=%D0%97%D0%B4%D1%80%D0%B0%D0%B2%D1%81%D1%82%D0%B2%D1%83%D0%B9%D1%82%D0%B5!%20%D0%A5%D0%BE%D1%87%D1%83%20%D0%BF%D0%BE%D0%B4%D0%BA%D0%BB%D1%8E%D1%87%D0%B8%D1%82%D1%8C%20AI-%D0%B0%D1%81%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BD%D1%82%D0%B0" target="_blank" rel="noopener" class="btn btn-primary btn-lg">Начать бесплатно</a>
+      <a href="#/app" class="btn btn-ghost btn-lg">${ic(I.play,15)} Посмотреть демо</a>
+    </div>
+    <p class="tiny muted" style="margin-top:16px">14 дней бесплатно. Карта не нужна.</p>
+  </div>
+  <div class="thread-demo">
+    <div class="thread-demo-top">
+      ${av('Айгерим С',0)}
+      <div><div style="font-weight:600;font-size:14px">Айгерим</div><div class="tiny muted">+7 701 ••• 5678</div></div>
+      <span class="chip chip-ok" style="margin-left:auto"><span class="dot"></span>AI отвечает</span>
+    </div>
+    <div class="thread-demo-body">
+      <div class="bub bub-in" style="animation-delay:.1s">Здравствуйте! 42 размер есть?</div>
+      <div class="bub bub-out" style="animation-delay:.7s">Здравствуйте! Да, Nike Air Max в 42 размере есть — 3 пары, 47 900 ₸. Оформить доставку?</div>
+      <div class="bub-meta" style="animation-delay:.9s">Ответ за 4 секунды</div>
+      <div class="bub bub-in" style="animation-delay:1.4s">Давайте. В Астану когда придёт?</div>
+      <div class="bub bub-out" style="animation-delay:2s">2–3 рабочих дня. При заказе от 50 000 ₸ доставка бесплатная — вам не хватает 2 100 ₸ до неё.</div>
+    </div>
+  </div>
+</div></section>
+
+<section class="sec" id="how"><div class="pub">
+  <div class="sec-head"><h2>Что происходит после сообщения клиента</h2>
+  <p>Пять шагов, каждый из которых видно в интерфейсе — включая тот, где ассистент решает промолчать.</p></div>
+  <div class="pipe">
+    <div class="rail">${steps.map((s,i)=>`<div class="rail-item ${i<3?'on':''}">
+      <div class="pipe-step"><h4>${s[0]}</h4><p>${s[1]}</p></div></div>`).join('')}</div>
+    <div class="card card-p">
+      <div class="spread" style="margin-bottom:18px"><span style="font-weight:700">Проверка уверенности</span><span class="chip chip-ok">порог 72%</span></div>
+      <div style="margin-bottom:16px"><div class="spread small" style="margin-bottom:6px"><span>Есть 42 размер?</span><span class="mono up" style="font-weight:600">96%</span></div>
+        <div style="height:6px;background:var(--surface-2);border-radius:3px"><div style="height:100%;width:96%;background:var(--pine);border-radius:3px"></div></div>
+        <div class="tiny muted" style="margin-top:5px">Найдено в «Каталог осень 2026»</div></div>
+      <div style="margin-bottom:16px"><div class="spread small" style="margin-bottom:6px"><span>Есть рассрочка на 12 месяцев?</span><span class="mono" style="font-weight:600;color:var(--amber)">38%</span></div>
+        <div style="height:6px;background:var(--surface-2);border-radius:3px"><div style="height:100%;width:38%;background:var(--amber);border-radius:3px"></div></div>
+        <div class="tiny" style="margin-top:5px;color:var(--amber)">Ниже порога — диалог передан менеджеру</div></div>
+      <div class="tiny muted" style="border-top:1px solid var(--line);padding-top:14px">Ассистент не отвечает наугад. Пробел в базе знаний виден вам, а не клиенту.</div>
+    </div>
+  </div>
+</div></section>
+
+<section class="sec" id="feat"><div class="pub">
+  <div class="sec-head"><h2>Что входит в платформу</h2><p>Не отдельный чат-бот, а рабочее место отдела продаж вокруг WhatsApp.</p></div>
+  <div class="feat-grid">${feats.map(f=>`<div class="feat"><div class="feat-ic">${ic(I[f[0]],18)}</div>
+    <h3>${f[1]}</h3><p>${f[2]}</p></div>`).join('')}</div>
+</div></section>
+
+<section class="sec" id="price"><div class="pub">
+  <div class="sec-head"><h2>Тарифы</h2><p>Первые 14 дней бесплатно на любом тарифе. Оплата помесячно, без договора на год.</p></div>
+  <div class="price-grid">${plans.map(p=>`<div class="price ${p[3]?'hl':''}">
+    ${p[3]?'<span class="chip chip-ok" style="margin-bottom:10px">Чаще всего выбирают</span>':''}
+    <div style="font-weight:700;font-size:15px">${p[0]}</div>
+    <div class="price-amt">${p[1]}</div>
+    <div class="tiny muted">${p[1]==='Договорная'?'обсуждается индивидуально':'в месяц'}</div>
+    <ul>${p[2].map(f=>`<li>${ic(I.ok,14)}<span>${f}</span></li>`).join('')}</ul>
+    <a href="https://wa.me/77089298041?text=%D0%97%D0%B4%D1%80%D0%B0%D0%B2%D1%81%D1%82%D0%B2%D1%83%D0%B9%D1%82%D0%B5!%20%D0%A5%D0%BE%D1%87%D1%83%20%D0%BF%D0%BE%D0%B4%D0%BA%D0%BB%D1%8E%D1%87%D0%B8%D1%82%D1%8C%20AI-%D0%B0%D1%81%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BD%D1%82%D0%B0" target="_blank" rel="noopener" class="btn ${p[3]?'btn-primary':'btn-ghost'}" style="width:100%">Начать</a></div>`).join('')}</div>
+</div></section>
+
+<section class="sec" id="faq"><div class="pub">
+  <div class="sec-head"><h2>Вопросы</h2></div>
+  <div style="max-width:820px">${faq.map((f,i)=>`<div class="faq-item">
+    <button class="faq-q" onclick="document.getElementById('fa${i}').classList.toggle('hide')">
+      <span>${f[0]}</span><span class="muted">${ic(I.plus,16)}</span></button>
+    <div class="faq-a hide" id="fa${i}">${f[1]}</div></div>`).join('')}</div>
+</div></section>
+
+<section class="sec"><div class="pub" style="text-align:center">
+  <h2 class="display" style="font-size:clamp(24px,3.4vw,34px);margin-bottom:14px">Соберите ассистента за вечер</h2>
+  <p class="muted" style="max-width:46ch;margin:0 auto 26px">Регистрация, база знаний и тестовый чат работают сразу. Номер подключается отдельно — через официальный процесс Meta.</p>
+  <a href="https://wa.me/77089298041?text=%D0%97%D0%B4%D1%80%D0%B0%D0%B2%D1%81%D1%82%D0%B2%D1%83%D0%B9%D1%82%D0%B5!%20%D0%A5%D0%BE%D1%87%D1%83%20%D0%BF%D0%BE%D0%B4%D0%BA%D0%BB%D1%8E%D1%87%D0%B8%D1%82%D1%8C%20AI-%D0%B0%D1%81%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BD%D1%82%D0%B0" target="_blank" rel="noopener" class="btn btn-primary btn-lg">Начать бесплатно</a>
+</div></section>
+
+<footer class="foot"><div class="pub spread" style="flex-wrap:wrap;gap:16px">
+  <span>© 2026 Simple. Алматы, Казахстан Аксай 55/1</span>
+  <span class="row" style="gap:20px"><a href="#/">Договор оферты</a><a href="#/">Политика данных</a><a href="#/">Поддержка</a></span>
+</div></footer>`;
+}
+
+function viewLogin(){
+  return `<div class="auth"><div class="auth-card">
+    <a href="#/" class="logo" style="margin-bottom:26px"><span class="logo-mark">${ic('<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z" fill="white" stroke="white"/>',15)}</span>Simple</a>
+    <div class="card card-p" style="padding:28px">
+      <h1>С возвращением</h1>
+      <p class="small muted" style="margin-bottom:24px">Войдите, чтобы вернуться к диалогам.</p>
+      <label class="field"><span class="label">Рабочая почта</span><input class="input" type="email" value="nurzhan@demostore.kz"></label>
+      <label class="field"><span class="label">Пароль</span><input class="input" type="password" value="demo12345"></label>
+      <div class="spread" style="margin-bottom:20px"><label class="row small"><input type="checkbox" checked> Запомнить меня</label>
+        <a href="#/login" class="small" style="color:var(--pine);font-weight:600">Забыли пароль?</a></div>
+      <a href="#/app" class="btn btn-primary" style="width:100%">Войти</a>
+      <p class="small muted" style="text-align:center;margin-top:18px">Нет аккаунта? <a href="https://wa.me/77089298041?text=%D0%97%D0%B4%D1%80%D0%B0%D0%B2%D1%81%D1%82%D0%B2%D1%83%D0%B9%D1%82%D0%B5!%20%D0%A5%D0%BE%D1%87%D1%83%20%D0%BF%D0%BE%D0%B4%D0%BA%D0%BB%D1%8E%D1%87%D0%B8%D1%82%D1%8C%20AI-%D0%B0%D1%81%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BD%D1%82%D0%B0" target="_blank" rel="noopener" style="color:var(--pine);font-weight:600">Зарегистрироваться</a></p>
+    </div></div></div>`;
+}
+
+function viewRegister(){
+  return `<div class="auth"><div class="auth-card">
+    <a href="#/" class="logo" style="margin-bottom:26px"><span class="logo-mark">${ic('<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z" fill="white" stroke="white"/>',15)}</span>Simple</a>
+    <div class="card card-p" style="padding:28px">
+      <h1>Создать аккаунт</h1>
+      <p class="small muted" style="margin-bottom:24px">14 дней бесплатно, карта не нужна.</p>
+      <div class="grid" style="grid-template-columns:1fr 1fr;gap:12px">
+        <label class="field"><span class="label">Имя</span><input class="input" placeholder="Нұржан"></label>
+        <label class="field"><span class="label">Фамилия</span><input class="input" placeholder="Ахметов"></label>
+      </div>
+      <label class="field"><span class="label">Рабочая почта</span><input class="input" type="email" placeholder="you@company.kz"></label>
+      <label class="field"><span class="label">Телефон</span><input class="input" placeholder="+7 707 000 00 00"></label>
+      <label class="field"><span class="label">Компания</span><input class="input" placeholder="Название бизнеса"></label>
+      <label class="field"><span class="label">Пароль</span><input class="input" type="password" placeholder="Минимум 8 символов">
+        <span class="hint">Минимум 8 символов, буквы и цифры.</span></label>
+      <a href="#/onboarding" class="btn btn-primary" style="width:100%">Создать аккаунт</a>
+      <p class="tiny muted" style="text-align:center;margin-top:14px">Продолжая, вы принимаете оферту и политику обработки данных.</p>
+      <p class="small muted" style="text-align:center;margin-top:14px">Уже есть аккаунт? <a href="#/login" style="color:var(--pine);font-weight:600">Войти</a></p>
+    </div></div></div>`;
+}
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════
+   ОНБОРДИНГ
+   ═══════════════════════════════════════════════════════════ */
+let onbStep = 1;
+const ONB = ['О вашем бизнесе','Подключение WhatsApp','Настройка ассистента','База знаний','Готово'];
+
+function viewOnboarding(){
+  const body = [null,
+    `<h1>Расскажите о бизнесе</h1><p class="muted" style="margin-bottom:26px">Эти данные попадут в контекст ассистента — он будет знать, где вы находитесь и чем занимаетесь.</p>
+     <label class="field"><span class="label">Название компании</span><input class="input" value="Demo Store"></label>
+     <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px">
+       <label class="field"><span class="label">Сфера</span><select class="select"><option>Розничная торговля</option><option>Общепит</option><option>Услуги</option><option>Оптовая торговля</option></select></label>
+       <label class="field"><span class="label">Страна</span><select class="select"><option>Казахстан</option><option>Узбекистан</option><option>Кыргызстан</option></select></label>
+     </div>
+     <label class="field"><span class="label">Город</span><input class="input" value="Алматы"></label>
+     <label class="field"><span class="label">Сайт</span><input class="input" placeholder="demostore.kz"></label>
+     <label class="field"><span class="label">Чем занимаетесь</span><textarea class="textarea">Продаём оригинальные кроссовки и кеды. Три магазина в Алматы, доставка по Казахстану.</textarea>
+       <span class="hint">Пары предложений достаточно — ассистент будет опираться на этот текст, когда клиент спросит «а вы кто?».</span></label>`,
+    `<h1>Подключите WhatsApp</h1><p class="muted" style="margin-bottom:26px">Подключение идёт через WhatsApp Business Platform. Веб-сессии и QR-обходы мы не используем — именно из-за них номера попадают под блокировку.</p>
+     <div class="card card-p" style="margin-bottom:16px">
+       <div class="row" style="margin-bottom:12px"><span class="feat-ic" style="margin:0">${ic(I.wa,18)}</span>
+         <div><div style="font-weight:700">Официальное подключение</div><div class="small muted">Вход через Meta, номер остаётся вашим</div></div></div>
+       <p class="small muted" style="margin-bottom:16px">Понадобится подтверждённый Business Manager и номер, не привязанный к обычному WhatsApp.</p>
+       <button class="btn btn-primary" onclick="alert('Здесь открывается окно авторизации Meta.\\n\\nВ этом прототипе шага нет: он появляется после одобрения Tech Provider — притворяться подключением мы не будем.')">Подключить WhatsApp Business</button>
+     </div>
+     <div class="card card-p">
+       <div style="font-weight:700;margin-bottom:6px">Уже есть свой WABA?</div>
+       <p class="small muted" style="margin-bottom:14px">Введите Phone Number ID и токен доступа вручную — этот путь работает, пока идёт проверка на стороне Meta.</p>
+       <label class="field"><span class="label">Phone Number ID</span><input class="input mono" placeholder="19283746501928"></label>
+       <label class="field" style="margin-bottom:0"><span class="label">Токен доступа</span><input class="input mono" type="password" placeholder="EAAG...">
+         <span class="hint">Хранится в зашифрованном виде и никогда не показывается целиком.</span></label>
+     </div>
+     <p class="small muted" style="margin-top:16px">Можно пропустить и настроить позже — ассистента получится протестировать и без номера.</p>`,
+    `<h1>Настройте ассистента</h1><p class="muted" style="margin-bottom:26px">Ответы на эти вопросы соберутся в системную инструкцию. Позже её можно поменять или открыть целиком.</p>
+     <label class="field"><span class="label">Как обращаться к клиентам</span>
+       <select class="select"><option>На «вы», по имени</option><option>На «вы», без имени</option><option>На «ты», по имени</option></select></label>
+     <label class="field"><span class="label">Стиль общения</span>
+       <div class="row" style="flex-wrap:wrap;gap:7px">${['Дружелюбный','Профессиональный','Короткий','Подробный','Формальный'].map((t,i)=>`<button class="chip ${i===0?'chip-ok':''}" onclick="this.parentNode.querySelectorAll('.chip').forEach(c=>c.className='chip');this.className='chip chip-ok'">${t}</button>`).join('')}</div></label>
+     <label class="field"><span class="label">Языки</span>
+       <div class="row" style="flex-wrap:wrap;gap:7px">${['Русский','Қазақша','English','Определять автоматически'].map((t,i)=>`<span class="chip ${i<2||i===3?'chip-ok':''}">${t}</span>`).join('')}</div></label>
+     <label class="field"><span class="label">Что должен делать</span><textarea class="textarea">Отвечать о наличии, размерах, цене и доставке. Помогать выбрать модель. Собирать заявки на заказ.</textarea></label>
+     <label class="field"><span class="label">Что запрещено</span><textarea class="textarea">Не давать скидки и не обещать сроки, которых нет в базе знаний. Не спорить с клиентом. Не выдумывать наличие товара.</textarea></label>`,
+    `<h1>Добавьте знания</h1><p class="muted" style="margin-bottom:26px">Пока база пустая, ассистент почти на всё будет отвечать «уточню у менеджера». Загрузите то, что чаще всего спрашивают.</p>
+     <div class="card" style="border-style:dashed;padding:36px;text-align:center;margin-bottom:18px">
+       <div class="empty-ic" style="margin-bottom:12px">${ic(I.file,22)}</div>
+       <div style="font-weight:700;margin-bottom:5px">Перетащите файлы сюда</div>
+       <p class="small muted" style="margin-bottom:14px">PDF, DOCX, TXT, CSV, XLSX — до 20 МБ</p>
+       <button class="btn btn-ghost btn-sm">Выбрать файлы</button></div>
+     <div class="card" style="overflow:hidden;margin-bottom:18px">
+       ${[['Условия доставки и оплаты.pdf','240 КБ'],['Каталог осень 2026.xlsx','1,2 МБ']].map(f=>`
+       <div class="spread" style="padding:13px 16px;border-bottom:1px solid var(--line)">
+         <div class="row">${ic(I.file,17)}<div><div class="small" style="font-weight:600">${f[0]}</div><div class="tiny muted">${f[1]}</div></div></div>
+         <span class="chip chip-ok">${ic(I.ok,12)} Готов</span></div>`).join('')}
+     </div>
+     <label class="field"><span class="label">Или впишите вручную</span>
+       <textarea class="textarea" placeholder="Например: доставка по Алматы — на следующий день, 1 500 ₸. По Казахстану — 2–3 дня, 2 500 ₸. От 50 000 ₸ бесплатно."></textarea></label>`,
+    `<div style="text-align:center;padding:44px 0">
+       <div style="width:66px;height:66px;border-radius:20px;background:var(--pine-soft);color:var(--pine);display:grid;place-items:center;margin:0 auto 22px">${ic(I.ok,30)}</div>
+       <h1>Ассистент готов</h1>
+       <p class="muted" style="max-width:44ch;margin:12px auto 28px">Он знает о вашем бизнесе и умеет отвечать по загруженным документам. Проверьте его в тестовом чате, прежде чем пускать к клиентам.</p>
+       <div class="row" style="justify-content:center;gap:12px;flex-wrap:wrap">
+         <a href="#/app/playground" class="btn btn-primary btn-lg">Открыть тестовый чат</a>
+         <a href="#/app" class="btn btn-ghost btn-lg">В панель</a></div></div>`
+  ][onbStep];
+
+  return `<div class="onb">
+    <aside class="onb-side">
+      <a href="#/" class="logo" style="margin-bottom:34px"><span class="logo-mark">${ic('<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z" fill="white" stroke="white"/>',15)}</span>Simple</a>
+      <div class="rail">${ONB.map((s,i)=>`<div class="rail-item ${i+1<=onbStep?'on':''}">
+        <div class="small" style="font-weight:${i+1===onbStep?'700':'500'};color:${i+1===onbStep?'var(--ink)':'var(--muted)'}">${s}</div>
+        <div class="tiny muted">Шаг ${i+1}</div></div>`).join('')}</div>
+    </aside>
+    <main class="onb-main"><div class="onb-body">${body}
+      ${onbStep<5?`<div class="spread" style="margin-top:30px;border-top:1px solid var(--line);padding-top:22px">
+        <button class="btn btn-quiet" onclick="onbGo(${onbStep-1})" ${onbStep===1?'disabled':''}>Назад</button>
+        <div class="row"><button class="btn btn-ghost" onclick="onbGo(${onbStep+1})">Пропустить</button>
+        <button class="btn btn-primary" onclick="onbGo(${onbStep+1})">Дальше</button></div></div>`:''}
+    </div></main></div>`;
+}
+function onbGo(n){ onbStep=Math.max(1,Math.min(5,n)); render(); window.scrollTo(0,0); }
+</script>
+<script>
+/* ═══════════════════════════════════════════════════════════
+   ОБОЛОЧКА ПАНЕЛИ
+   ═══════════════════════════════════════════════════════════ */
+const NAV = [
+  ['Работа',[
+    ['','home','Обзор',null],
+    ['conversations','chat','Диалоги','3'],
+    ['customers','users','Клиенты',null],
+    ['leads','kanban','Лиды',null],
+    ['products','box','Товары',null],
+  ]],
+  ['Ассистент',[
+    ['assistant','spark','Ассистент',null],
+    ['prompt','flow','Инструкции',null],
+    ['knowledge','book','База знаний',null],
+    ['playground','play','Тестовый чат',null],
+  ]],
+  ['Данные',[
+    ['analytics','chart','Аналитика',null],
+    ['ai-analytics','up','Работа AI',null],
+  ]],
+  ['Настройка',[
+    ['whatsapp','wa','WhatsApp',null],
+    ['integrations','plug','Интеграции',null],
+    ['team','users','Команда',null],
+    ['billing','card','Тариф',null],
+    ['settings','cog','Настройки',null],
+  ]],
+];
+
+let route = '';
+let sideOpen = false;
+
+function shell(inner, title, wide){
+  return `
+  ${sideOpen?'<div class="scrim" onclick="sideOpen=false;render()"></div>':''}
+  <div class="shell">
+    <aside class="side ${sideOpen?'open':''}">
+      <div class="side-top">
+        <a href="#/" class="logo" style="font-size:15px"><span class="logo-mark">${ic('<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z" fill="white" stroke="white"/>',14)}</span>Simple</a>
+        <div class="row" style="margin-top:12px;padding:7px 9px;background:var(--surface-2);border-radius:var(--r-sm)">
+          <div class="avatar" style="width:26px;height:26px;font-size:11px;background:var(--pine)">DS</div>
+          <div style="min-width:0"><div class="small" style="font-weight:700">${S.company.name}</div>
+            <div class="tiny muted">Тариф «${S.company.plan}»</div></div>
+        </div>
+      </div>
+      <nav class="side-nav">${NAV.map(g=>`<div class="nav-group">${g[0]}</div>${g[1].map(i=>`
+        <a href="#/app${i[0]?'/'+i[0]:''}" class="nav-i ${route===i[0]?'on':''}" onclick="sideOpen=false">
+          ${ic(I[i[1]],17)}<span>${i[2]}</span>${i[3]?`<span class="nav-badge">${i[3]}</span>`:''}</a>`).join('')}`).join('')}
+      </nav>
+      <div style="padding:12px;border-top:1px solid var(--line)">
+        <div class="row"><div class="avatar" style="width:30px;height:30px;font-size:11px;background:var(--blue)">${S.user.initials}</div>
+          <div style="min-width:0;flex:1"><div class="small" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${S.user.name}</div>
+            <div class="tiny muted">${S.user.role}</div></div>
+          <a href="#/" class="btn btn-quiet btn-sm" title="Выйти">${ic('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',16)}</a></div>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="top">
+        <button class="burger" onclick="sideOpen=true;render()">${ic(I.menu,19)}</button>
+        <h1>${title}</h1>
+        <div class="row" style="margin-left:auto">
+          <span class="chip ${S.ai.enabled?'chip-ok':''}"><span class="dot"></span>${S.ai.enabled?'AI включён':'AI выключен'}</span>
+          <button class="btn btn-quiet btn-sm" title="Уведомления">${ic(I.bell,17)}</button>
+        </div>
+      </header>
+      ${wide ? inner : `<div class="page">${inner}</div>`}
+    </div>
+  </div>`;
+}
+const demoFlag = t => `<div class="demo-flag">${ic(I.warn,15)}<span>${t||'Демо-данные компании «Demo Store». Реальные цифры появятся после подключения номера.'}</span></div>`;
+
+/* ── Обзор ────────────────────────────────────────────────── */
+function pgDashboard(){
+  const kpi=[['Сообщений сегодня','147','+18%','up'],['Новых клиентов','12','+3','up'],
+             ['AI закрыл сам','83%','+4%','up'],['Среднее время ответа','8 сек','−2 сек','up']];
+  return demoFlag() + `
+  <div class="kpis">${kpi.map(k=>`<div class="kpi"><div class="kpi-l">${k[0]}</div>
+    <div class="kpi-v">${k[1]}</div><div class="kpi-d ${k[3]}">${k[2]} к прошлой неделе</div></div>`).join('')}</div>
+  <div class="grid" style="grid-template-columns:1.6fr 1fr">
+    <div class="card card-p">
+      <div class="spread" style="margin-bottom:16px"><div style="font-weight:700">Сообщения за две недели</div>
+        <select class="select" style="width:auto;height:32px;font-size:13px"><option>14 дней</option><option>30 дней</option></select></div>
+      ${line(SERIES,600,150)}
+      <div class="spread tiny muted" style="margin-top:8px"><span>5 авг</span><span>19 авг</span></div>
+    </div>
+    <div class="card card-p">
+      <div style="font-weight:700;margin-bottom:16px">Состояние</div>
+      ${[['WhatsApp подключён',true,S.wa.number],['Ассистент включён',true,'модель '+S.ai.model],
+         ['База знаний',true,S.kb.docs+' документов, обновлена '+S.kb.updated],['Вебхук активен',true,'последнее событие 2 мин назад']]
+        .map(r=>`<div class="row" style="margin-bottom:13px;align-items:flex-start">
+          <span style="color:var(--pine);margin-top:2px">${ic(I.ok,15)}</span>
+          <div><div class="small" style="font-weight:600">${r[0]}</div><div class="tiny muted">${r[2]}</div></div></div>`).join('')}
+      <div style="border-top:1px solid var(--line);padding-top:13px;margin-top:4px">
+        <div class="spread small"><span class="muted">Качество AI</span><span style="font-weight:700">4,6 / 5</span></div></div>
+    </div>
+  </div>
+  <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:16px">
+    <div class="card card-p"><div style="font-weight:700;margin-bottom:16px">О чём спрашивают</div>${rank(INTENTS)}</div>
+    <div class="card card-p">
+      <div class="spread" style="margin-bottom:14px"><div style="font-weight:700">Требуют внимания</div>
+        <a href="#/app/conversations" class="small" style="color:var(--pine);font-weight:600">Все диалоги</a></div>
+      ${CONVS.filter(c=>c.status!=='closed').slice(0,4).map((c,i)=>`
+        <a href="#/app/conversations" class="row" style="padding:9px 0;border-bottom:1px solid var(--line)">
+          ${av(c.name,i)}<div style="min-width:0;flex:1">
+            <div class="small" style="font-weight:600">${c.name}</div>
+            <div class="tiny muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.preview}</div></div>
+          ${statusChip(c.status)}</a>`).join('')}
+    </div>
+  </div>`;
+}
+const statusChip = s => ({
+  ai:'<span class="chip chip-ok"><span class="dot"></span>AI</span>',
+  human:'<span class="chip chip-warn"><span class="dot"></span>Менеджер</span>',
+  new:'<span class="chip chip-info">Новый</span>',
+  wait:'<span class="chip chip-warn">Ждёт ответа</span>',
+  closed:'<span class="chip">Закрыт</span>',
+}[s]||'');
+</script>
+<script>
+/* ── Диалоги ──────────────────────────────────────────────── */
+let convId = 1, convFilter = 'all';
+function pgInbox(){
+  const list = CONVS.filter(c => convFilter==='all' ? true :
+    convFilter==='unread' ? c.unread>0 :
+    convFilter==='human' ? c.status==='human'||c.status==='wait' :
+    convFilter==='closed' ? c.status==='closed' : true);
+  const c = CONVS.find(x=>x.id===convId) || CONVS[0];
+  const cust = CUSTOMERS.find(x=>x.id===c.cid);
+  const filters = [['all','Все'],['unread','Непрочитанные'],['human','У менеджера'],['closed','Закрытые']];
+
+  return `<div class="inbox">
+    <div class="inbox-list">
+      <div class="inbox-filters">
+        <div style="position:relative"><span style="position:absolute;left:11px;top:11px;color:var(--muted)">${ic(I.search,15)}</span>
+          <input class="input" placeholder="Поиск по имени или номеру" style="height:38px;padding-left:34px;font-size:13.5px"></div>
+        <div class="filter-row">${filters.map(f=>`<button class="chip ${convFilter===f[0]?'chip-ok':''}" onclick="convFilter='${f[0]}';render()">${f[1]}</button>`).join('')}</div>
+      </div>
+      <div style="flex:1;overflow-y:auto">${list.length?list.map((x,i)=>`
+        <div class="conv ${x.id===convId?'on':''}" onclick="convId=${x.id};render()">
+          ${av(x.name,i)}
+          <div style="flex:1;min-width:0">
+            <div class="spread"><span class="conv-n">${x.name}</span><span class="tiny muted">${x.time}</span></div>
+            <div class="conv-p">${x.preview}</div>
+            <div class="row" style="margin-top:5px;gap:6px">${statusChip(x.status)}
+              ${x.unread?`<span class="nav-badge">${x.unread}</span>`:''}</div>
+          </div></div>`).join('') : `<div class="empty"><h3>Здесь пусто</h3><p>Под этот фильтр диалогов нет.</p></div>`}
+      </div>
+    </div>
+
+    <div class="thread">
+      <div class="thread-h spread">
+        <div class="row">${av(c.name,0)}
+          <div><div style="font-weight:700;font-size:14.5px">${c.name}</div>
+            <div class="tiny muted">${cust?cust.p+' · '+cust.c:''}</div></div></div>
+        <div class="row">${statusChip(c.status)}
+          ${c.status==='ai'
+            ? `<button class="btn btn-ghost btn-sm" onclick="takeOver(${c.id})">Забрать диалог</button>`
+            : `<button class="btn btn-ghost btn-sm" onclick="returnAI(${c.id})">Вернуть ассистенту</button>`}</div>
+      </div>
+      <div class="thread-b">${c.msgs.map(m => m.d==='sys'
+        ? `<div class="tiny muted" style="text-align:center;padding:6px 0">${ic(I.warn,12)} ${m.t}</div>`
+        : `<div class="msg ${m.d==='in'?'msg-in':'msg-out'}">${m.t}
+             <span class="msg-t">${m.at}${m.by?' · '+m.by:''}</span></div>`).join('')}
+        ${c.status!=='closed'?`<div class="copilot">
+          <div class="row" style="margin-bottom:8px;color:var(--pine-600)">${ic(I.spark,15)}
+            <span class="tiny" style="font-weight:700;letter-spacing:.05em;text-transform:uppercase">Подсказка ассистента</span></div>
+          <p class="small" style="margin-bottom:11px">Да, в чёрном цвете Nike Air Max 90 есть в 41 и 42 размере — 47 900 ₸. Прислать фото?</p>
+          <div class="row" style="gap:7px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm">Отправить</button>
+            <button class="btn btn-ghost btn-sm">Изменить</button>
+            <button class="btn btn-quiet btn-sm">Другой вариант</button></div></div>`:''}
+      </div>
+      <div class="thread-f">
+        <div class="row"><input class="input" placeholder="Написать сообщение…">
+          <button class="btn btn-primary">${ic(I.send,16)}</button></div>
+        <div class="tiny muted" style="margin-top:7px">Окно 24 часа открыто до 14:14 завтра. После него — только шаблонное сообщение.</div>
+      </div>
+    </div>
+
+    <aside class="ctx">
+      <div class="row" style="margin-bottom:14px">${av(c.name,0)}
+        <div><div style="font-weight:700;font-size:14px">${c.name}</div><div class="tiny muted">${cust?cust.src:''}</div></div></div>
+      <a href="#/app/customers" class="btn btn-ghost btn-sm" style="width:100%">Карточка клиента</a>
+      <div class="ctx-l">Контакты</div>
+      <div class="small mono">${cust?cust.p:''}</div>
+      <div class="small muted">${cust?cust.c:''}</div>
+      <div class="ctx-l">Теги</div>
+      <div class="row" style="flex-wrap:wrap;gap:6px">${cust?cust.tags.map(t=>`<span class="chip">${t}</span>`).join(''):''}
+        <button class="chip" style="border-style:dashed">${ic(I.plus,12)}</button></div>
+      <div class="ctx-l">Статистика</div>
+      ${cust?[['Диалогов',cust.convs],['Заказов',cust.orders],['Сумма',cust.sum],['Последний контакт',cust.last+' назад']]
+        .map(r=>`<div class="spread small" style="padding:5px 0"><span class="muted">${r[0]}</span><span style="font-weight:600">${r[1]}</span></div>`).join(''):''}
+      <div class="ctx-l">Заметка</div>
+      <textarea class="textarea" style="min-height:70px;font-size:13px" placeholder="Видна только команде"></textarea>
+    </aside>
+  </div>`;
+}
+function takeOver(id){ const c=CONVS.find(x=>x.id===id); c.status='human';
+  c.msgs.push({d:'sys',t:'Менеджер забрал диалог — ассистент больше не отвечает автоматически',at:'сейчас'}); render(); }
+function returnAI(id){ const c=CONVS.find(x=>x.id===id); c.status='ai';
+  c.msgs.push({d:'sys',t:'Диалог возвращён ассистенту',at:'сейчас'}); render(); }
+
+/* ── Клиенты ──────────────────────────────────────────────── */
+function pgCustomers(){
+  return demoFlag('Демо-клиенты. Настоящие карточки создаются автоматически, как только человек напишет в WhatsApp.') + `
+  <div class="spread" style="margin-bottom:16px">
+    <div class="row"><div style="position:relative"><span style="position:absolute;left:11px;top:11px;color:var(--muted)">${ic(I.search,15)}</span>
+      <input class="input" placeholder="Имя, номер или тег" style="width:280px;padding-left:34px"></div>
+      <select class="select" style="width:auto"><option>Все теги</option><option>VIP</option><option>Горячий лид</option></select></div>
+    <button class="btn btn-ghost">Выгрузить в CSV</button></div>
+  <div class="card" style="overflow-x:auto"><table>
+    <thead><tr><th>Клиент</th><th>Город</th><th>Теги</th><th>Диалогов</th><th>Заказов</th><th>Сумма</th><th>Последний контакт</th></tr></thead>
+    <tbody>${CUSTOMERS.map((c,i)=>`<tr style="cursor:pointer" onclick="location.hash='#/app/conversations'">
+      <td><div class="row">${av(c.n,i)}<div><div style="font-weight:600">${c.n}</div><div class="tiny muted mono">${c.p}</div></div></div></td>
+      <td class="muted">${c.c}</td>
+      <td><div class="row" style="gap:5px;flex-wrap:wrap">${c.tags.map(t=>`<span class="chip">${t}</span>`).join('')}</div></td>
+      <td class="mono">${c.convs}</td><td class="mono">${c.orders}</td>
+      <td class="mono" style="font-weight:600">${c.sum}</td><td class="muted small">${c.last} назад</td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+
+/* ── Лиды ─────────────────────────────────────────────────── */
+function pgLeads(){
+  const colors={'Новый':'var(--blue)','Контакт установлен':'var(--blue)','Интересуется':'var(--amber)',
+    'Готов купить':'var(--pine)','Купил':'var(--pine)','Потерян':'var(--muted)'};
+  return demoFlag() + `
+  <div class="spread" style="margin-bottom:16px">
+    <p class="small muted">Ассистент двигает лид по воронке сам — по тому, что клиент пишет.</p>
+    <button class="btn btn-ghost btn-sm">${ic(I.plus,15)} Добавить вручную</button></div>
+  <div class="kanban">${Object.entries(LEADS).map(([k,v])=>`
+    <div class="kan-col">
+      <div class="kan-h"><span class="dot" style="color:${colors[k]}"></span>${k}
+        <span class="muted" style="margin-left:auto;font-weight:600">${v.length}</span></div>
+      ${v.map((l,i)=>`<div class="kan-card">
+        <div class="row" style="margin-bottom:8px">${av(l.n,i)}<div style="min-width:0">
+          <div class="small" style="font-weight:600">${l.n}</div><div class="tiny muted">${l.t} назад</div></div></div>
+        <div class="spread"><span class="small mono" style="font-weight:600">${l.v}</span>
+          <span class="tiny muted">${ic(I.chat,13)}</span></div></div>`).join('')}
+      <button class="btn btn-quiet btn-sm" style="width:100%">${ic(I.plus,14)}</button>
+    </div>`).join('')}</div>`;
+}
+
+/* ── Товары ───────────────────────────────────────────────── */
+function pgProducts(){
+  return demoFlag('Демо-каталог. Ассистент подставляет эти данные в ответы о наличии и цене.') + `
+  <div class="spread" style="margin-bottom:16px">
+    <div class="row"><input class="input" placeholder="Поиск по названию или SKU" style="width:280px">
+      <select class="select" style="width:auto"><option>Все категории</option><option>Кроссовки</option><option>Кеды</option></select></div>
+    <div class="row"><button class="btn btn-ghost">Импорт из XLSX</button>
+      <button class="btn btn-primary">${ic(I.plus,15)} Товар</button></div></div>
+  <div class="card" style="overflow-x:auto"><table>
+    <thead><tr><th>Товар</th><th>SKU</th><th>Категория</th><th>Цена</th><th>Остаток</th><th>Размеры</th><th>Статус</th></tr></thead>
+    <tbody>${PRODUCTS.map(p=>`<tr>
+      <td style="font-weight:600">${p.n}</td><td class="mono muted">${p.sku}</td><td class="muted">${p.cat}</td>
+      <td><span style="font-weight:600">${p.price}</span>${p.old?`<span class="tiny muted" style="text-decoration:line-through;margin-left:6px">${p.old}</span>`:''}</td>
+      <td class="mono ${p.stock===0?'':''}" style="${p.stock===0?'color:var(--red);font-weight:600':''}">${p.stock}</td>
+      <td class="muted mono">${p.sizes}</td>
+      <td>${p.st==='Активен'?'<span class="chip chip-ok">Активен</span>':'<span class="chip chip-bad">Нет в наличии</span>'}</td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+</script>
+<script>
+/* ── Ассистент ────────────────────────────────────────────── */
+function pgAssistant(){
+  return `<div class="page-narrow">
+  <div class="card card-p" style="margin-bottom:16px">
+    <div class="spread">
+      <div><div style="font-weight:700;font-size:16px">Ассистент ${S.ai.enabled?'отвечает клиентам':'выключен'}</div>
+        <p class="small muted" style="margin-top:4px">${S.ai.enabled?'Новые сообщения обрабатываются автоматически. Сложные уходят менеджеру.':'Все входящие ждут ответа менеджера.'}</p></div>
+      <div class="switch ${S.ai.enabled?'on':''}" onclick="S.ai.enabled=!S.ai.enabled;render()"></div></div>
+  </div>
+  <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
+    ${[['Обработано диалогов','412'],['Сообщений','3 847'],['Токенов','1,2 млн'],['Расход за месяц','≈ 18 400 ₸']]
+      .map(k=>`<div class="kpi"><div class="kpi-l">${k[0]}</div><div class="kpi-v" style="font-size:21px">${k[1]}</div></div>`).join('')}</div>
+
+  <div class="card card-p" style="margin-top:16px">
+    <div style="font-weight:700;margin-bottom:18px">Как он говорит</div>
+    <label class="field"><span class="label">Стиль</span>
+      <div class="row" style="flex-wrap:wrap;gap:7px">${['Дружелюбный','Профессиональный','Короткий','Подробный','Формальный','Неформальный']
+        .map(t=>`<button class="chip ${t===S.ai.tone?'chip-ok':''}" onclick="S.ai.tone='${t}';render()">${t}</button>`).join('')}</div></label>
+    <label class="field"><span class="label">Языки</span>
+      <div class="row" style="flex-wrap:wrap;gap:7px">${['Русский','Қазақша','English','Определять автоматически']
+        .map(t=>`<span class="chip ${S.ai.langs.includes(t)||t.startsWith('Опред')?'chip-ok':''}">${t}</span>`).join('')}</div>
+      <span class="hint">Ассистент отвечает на языке клиента: написали на казахском — ответ будет на казахском.</span></label>
+    <label class="field"><span class="label">Модель</span>
+      <select class="select"><option>claude-sonnet — баланс скорости и качества</option><option>claude-haiku — быстрее и дешевле</option></select></label>
+    <label class="field" style="margin-bottom:0"><span class="label">Порог уверенности — ${S.ai.confidence}%</span>
+      <input type="range" min="40" max="95" value="${S.ai.confidence}" style="width:100%;accent-color:var(--pine)"
+        oninput="S.ai.confidence=+this.value;this.previousElementSibling.textContent='Порог уверенности — '+this.value+'%'">
+      <span class="hint">Ниже порога ассистент не отвечает, а передаёт диалог менеджеру. Выше 80% — меньше ошибок, но больше передач.</span></label>
+  </div>
+
+  <div class="card card-p" style="margin-top:16px">
+    <div style="font-weight:700;margin-bottom:14px">Когда звать человека</div>
+    ${[['Клиент просит менеджера',true],['Жалоба или конфликт',true],['Ответа нет в базе знаний',true],
+       ['Уверенность ниже порога',true],['Вопрос про возврат денег',false]]
+      .map(r=>`<div class="spread" style="padding:9px 0;border-bottom:1px solid var(--line)">
+        <span class="small">${r[0]}</span><div class="switch ${r[1]?'on':''}"></div></div>`).join('')}
+  </div></div>`;
+}
+
+/* ── Инструкции ───────────────────────────────────────────── */
+function pgPrompt(){
+  const sys = `Ты — консультант магазина «Demo Store» (Алматы, продажа оригинальных кроссовок и кед).
+
+Обращайся к клиенту на «вы» и по имени, если оно известно. Стиль общения: ${S.ai.tone.toLowerCase()}.
+Отвечай на языке клиента — русский, казахский или английский.
+
+Твои задачи: отвечать о наличии, размерах, цене и доставке; помогать выбрать модель; собирать заявки на заказ.
+
+Запрещено: давать скидки; обещать сроки, которых нет в базе знаний; спорить с клиентом; выдумывать наличие товара.
+
+Если информации нет в базе знаний — не придумывай ответ. Скажи, что уточнишь у менеджера, и передай диалог человеку.`;
+  return `<div class="page-narrow">
+  <p class="small muted" style="margin-bottom:20px">Заполните блоки — инструкция соберётся сама. Ручное редактирование остаётся доступным ниже.</p>
+  <div class="card card-p" style="margin-bottom:14px">
+    <label class="field"><span class="label">Роль</span><input class="input" value="Консультант магазина «Demo Store»"></label>
+    <label class="field"><span class="label">Цель</span>
+      <div class="row" style="flex-wrap:wrap;gap:7px">${['Отвечать на вопросы','Продавать','Принимать заказы','Консультировать','Записывать клиентов','Собирать заявки']
+        .map((t,i)=>`<span class="chip ${i<3||i===5?'chip-ok':''}">${t}</span>`).join('')}</div></label>
+    <label class="field"><span class="label">Что запрещено</span>
+      <textarea class="textarea">Давать скидки. Обещать сроки, которых нет в базе знаний. Спорить с клиентом. Выдумывать наличие товара.</textarea></label>
+    <label class="field" style="margin-bottom:0"><span class="label">Если ответа нет в базе знаний</span>
+      <select class="select"><option>Передать менеджеру</option><option>Сказать, что уточнит, и создать задачу</option><option>Попросить клиента переформулировать</option></select>
+      <span class="hint">Выдумывать ответ ассистент не станет ни при одном из вариантов — это правило зашито.</span></label>
+  </div>
+  <div class="card card-p">
+    <div class="spread" style="margin-bottom:12px"><div style="font-weight:700">Собранная инструкция</div>
+      <span class="chip">${sys.length} символов</span></div>
+    <textarea class="textarea mono" style="min-height:230px;font-size:13px;line-height:1.6">${sys}</textarea>
+    <div class="row" style="margin-top:14px"><button class="btn btn-primary">Сохранить</button>
+      <a href="#/app/playground" class="btn btn-ghost">Проверить в тестовом чате</a></div>
+  </div></div>`;
+}
+
+/* ── База знаний ──────────────────────────────────────────── */
+let kbTab = 'docs';
+function pgKnowledge(){
+  const tabs=[['docs','Документы'],['manual','Свои записи'],['test','Проверка поиска']];
+  let body='';
+  if(kbTab==='docs'){
+    body = `<div class="card" style="border-style:dashed;padding:28px;text-align:center;margin-bottom:16px">
+      <div style="font-weight:700;margin-bottom:5px">Перетащите файлы сюда</div>
+      <p class="small muted" style="margin-bottom:12px">PDF, DOCX, TXT, CSV, XLSX — до 20 МБ</p>
+      <button class="btn btn-ghost btn-sm">Выбрать файлы</button></div>
+    <div class="card" style="overflow-x:auto"><table>
+      <thead><tr><th>Документ</th><th>Тип</th><th>Размер</th><th>Фрагментов</th><th>Статус</th><th>Загружен</th><th></th></tr></thead>
+      <tbody>${KB_DOCS.map(d=>`<tr>
+        <td><div class="row">${ic(I.file,16)}<span style="font-weight:600">${d.n}</span></div></td>
+        <td class="muted mono">${d.t}</td><td class="muted">${d.size}</td><td class="mono">${d.chunks}</td>
+        <td>${d.st==='Проиндексирован'?'<span class="chip chip-ok">Готов</span>':'<span class="chip chip-warn">Индексируется</span>'}</td>
+        <td class="muted small">${d.d}</td>
+        <td><button class="btn btn-quiet btn-sm">Удалить</button></td></tr>`).join('')}
+      </tbody></table></div>`;
+  } else if(kbTab==='manual'){
+    body = `<div class="card card-p">
+      <label class="field"><span class="label">Название</span><input class="input" value="Условия доставки"></label>
+      <label class="field"><span class="label">Текст</span>
+        <textarea class="textarea" style="min-height:170px">Доставка по Алматы — на следующий день, 1 500 ₸. По Казахстану — 2–3 рабочих дня, 2 500 ₸. При заказе от 50 000 ₸ доставка бесплатная. Самовывоз из магазина на Абая 115 — бесплатно, в день заказа.</textarea></label>
+      <button class="btn btn-primary">Сохранить и проиндексировать</button></div>`;
+  } else {
+    body = `<div class="card card-p">
+      <p class="small muted" style="margin-bottom:14px">Видно, что именно ассистент нашёл и насколько это подошло. Нужно, чтобы понимать, почему он ответил так.</p>
+      <div class="row" style="margin-bottom:20px"><input class="input" value="Есть ли доставка в Астану?"><button class="btn btn-primary">Найти</button></div>
+      ${[['Условия доставки и оплаты.pdf','фрагмент 12','По Казахстану доставка 2–3 рабочих дня, стоимость 2 500 ₸…',94],
+         ['Частые вопросы.txt','фрагмент 4','Доставляем во все города Казахстана через курьерскую службу…',81],
+         ['Адреса магазинов.txt','фрагмент 2','Магазины находятся в Алматы: Абая 115, Розыбакиева 247…',36]]
+        .map(r=>`<div style="padding:13px;border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:10px">
+          <div class="spread" style="margin-bottom:6px"><div class="row"><span class="small" style="font-weight:600">${r[0]}</span>
+            <span class="chip">${r[1]}</span></div>
+            <span class="mono small" style="font-weight:600;color:${r[3]>70?'var(--pine)':'var(--muted)'}">${r[3]}%</span></div>
+          <p class="small muted">${r[2]}</p></div>`).join('')}
+      <div class="card card-p" style="background:var(--pine-soft);border-color:transparent;margin-top:16px">
+        <div class="row" style="margin-bottom:8px;color:var(--pine-600)">${ic(I.spark,15)}
+          <span class="tiny" style="font-weight:700;letter-spacing:.05em;text-transform:uppercase">Итоговый ответ</span></div>
+        <p class="small">Да, доставляем в Астану — 2–3 рабочих дня, стоимость 2 500 ₸. При заказе от 50 000 ₸ доставка бесплатная.</p></div></div>`;
+  }
+  return `<div class="spread" style="margin-bottom:6px">
+      <p class="small muted">${S.kb.docs} документов · ${S.kb.chunks} фрагментов · обновлена ${S.kb.updated}</p></div>
+    <div class="tabs">${tabs.map(t=>`<button class="tab ${kbTab===t[0]?'on':''}" onclick="kbTab='${t[0]}';render()">${t[1]}</button>`).join('')}</div>
+    ${body}`;
+}
+
+/* ── Тестовый чат ─────────────────────────────────────────── */
+let play = [
+  {d:'in',t:'Сәлеметсіз бе! 42 өлшем бар ма?'},
+  {d:'out',t:'Сәлеметсіз бе! Иә, Nike Air Max 90 42 өлшемде бар — 3 жұп, бағасы 47 900 ₸. Жеткізуді рәсімдейік пе?',conf:96,src:'Каталог осень 2026'},
+];
+function pgPlayground(){
+  return `<div class="split">
+    <div class="split-l">
+      <div style="font-weight:700;margin-bottom:14px">Настройки для проверки</div>
+      <label class="field"><span class="label">Стиль</span><select class="select"><option>${S.ai.tone}</option></select></label>
+      <label class="field"><span class="label">Порог уверенности</span><input class="input" value="${S.ai.confidence}%"></label>
+      <label class="field"><span class="label">База знаний</span><select class="select"><option>Все документы (${S.kb.docs})</option><option>Только доставка</option></select></label>
+      <div class="card card-p" style="background:var(--surface-2);border:none">
+        <p class="small muted">Сообщения отсюда не уходят в WhatsApp. Это безопасная песочница: меняйте инструкцию и сразу проверяйте, как изменился ответ.</p></div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:14px;width:100%" onclick="play=[];render()">Очистить диалог</button>
+    </div>
+    <div class="split-r">
+      <div class="thread-b" style="flex:1">${play.length?play.map(m=>`
+        <div class="msg ${m.d==='in'?'msg-in':'msg-out'}">${m.t}</div>
+        ${m.conf?`<div class="tiny muted" style="align-self:flex-end;margin-top:-5px">уверенность ${m.conf}% · источник: ${m.src}</div>`:''}`).join('')
+        : `<div class="empty"><div class="empty-ic">${ic(I.play,22)}</div><h3>Задайте вопрос</h3>
+           <p>Спросите то же, что спрашивают клиенты — «есть 42 размер?», «доставка в Астану сколько?».</p></div>`}
+      </div>
+      <div class="thread-f"><div class="row">
+        <input class="input" id="playIn" placeholder="Написать как клиент…" onkeydown="if(event.key==='Enter')playSend()">
+        <button class="btn btn-primary" onclick="playSend()">${ic(I.send,16)}</button></div></div>
+    </div></div>`;
+}
+function playSend(){
+  const v=document.getElementById('playIn').value.trim(); if(!v)return;
+  play.push({d:'in',t:v});
+  play.push({d:'out',t:'В базе знаний нет точного ответа на этот вопрос. По правилам я не додумываю — передал бы диалог менеджеру.',conf:34,src:'совпадений не найдено'});
+  render();
+}
+</script>
+<script>
+/* ── Аналитика ────────────────────────────────────────────── */
+function pgAnalytics(){
+  const kpi=[['Сообщений','3 847','+22%'],['Диалогов','412','+14%'],['Клиентов','268','+31'],
+             ['Лидов','94','+12'],['Заказов','37','+5'],['Конверсия','8,9%','+1,2%']];
+  return demoFlag() + `
+  <div class="spread" style="margin-bottom:16px">
+    <div class="row"><select class="select" style="width:auto"><option>За 30 дней</option><option>За 7 дней</option><option>За квартал</option></select>
+      <select class="select" style="width:auto"><option>Все номера</option><option>${S.wa.number}</option></select>
+      <select class="select" style="width:auto"><option>Все менеджеры</option></select></div>
+    <button class="btn btn-ghost">Выгрузить отчёт</button></div>
+  <div class="kpis" style="grid-template-columns:repeat(3,1fr)">${kpi.map(k=>`<div class="kpi">
+    <div class="kpi-l">${k[0]}</div><div class="kpi-v" style="font-size:23px">${k[1]}</div>
+    <div class="kpi-d up">${k[2]}</div></div>`).join('')}</div>
+  <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:16px">
+    <div class="card card-p"><div style="font-weight:700;margin-bottom:14px">Диалоги по дням</div>${bars(SERIES,600,140)}</div>
+    <div class="card card-p"><div style="font-weight:700;margin-bottom:14px">Ассистент против человека</div>
+      <div class="row" style="gap:0;height:26px;border-radius:6px;overflow:hidden;margin-bottom:14px">
+        <div style="flex:83;background:var(--pine);height:100%"></div><div style="flex:17;background:var(--amber);height:100%"></div></div>
+      <div class="spread small" style="margin-bottom:7px"><span class="row"><span class="dot" style="color:var(--pine)"></span>Закрыл ассистент</span><span style="font-weight:700">83% · 342</span></div>
+      <div class="spread small"><span class="row"><span class="dot" style="color:var(--amber)"></span>Передано менеджеру</span><span style="font-weight:700">17% · 70</span></div>
+      <div style="border-top:1px solid var(--line);margin-top:14px;padding-top:12px">
+        ${[['Среднее время ответа AI','8 сек'],['Среднее время ответа менеджера','14 мин'],['Средняя длина диалога','6 сообщений']]
+          .map(r=>`<div class="spread small" style="padding:4px 0"><span class="muted">${r[0]}</span><span style="font-weight:600">${r[1]}</span></div>`).join('')}</div></div>
+  </div>
+  <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:16px">
+    <div class="card card-p"><div style="font-weight:700;margin-bottom:16px">Намерения клиентов</div>${rank(INTENTS)}</div>
+    <div class="card card-p"><div style="font-weight:700;margin-bottom:6px">Работа менеджеров</div>
+      <p class="tiny muted" style="margin-bottom:14px">Только по диалогам, которые ассистент передал человеку.</p>
+      <table><thead><tr><th>Менеджер</th><th>Диалогов</th><th>Заказов</th><th>Ответ</th></tr></thead>
+      <tbody>${[['Алина Ким',34,11,'9 мин'],['Ержан Абдиров',26,8,'17 мин'],['Салтанат Ким',10,2,'21 мин']]
+        .map((r,i)=>`<tr><td><div class="row">${av(r[0],i+2)}<span style="font-weight:600">${r[0]}</span></div></td>
+        <td class="mono">${r[1]}</td><td class="mono">${r[2]}</td><td class="mono muted">${r[3]}</td></tr>`).join('')}
+      </tbody></table></div>
+  </div>`;
+}
+
+/* ── Работа AI ────────────────────────────────────────────── */
+function pgAiAnalytics(){
+  return `
+  <div class="kpis">${[['Закрыл сам','342','83% диалогов'],['Передал менеджеру','70','17%'],
+    ['Не смог ответить','23','5,6%'],['Средняя уверенность','88%','порог '+S.ai.confidence+'%']]
+    .map(k=>`<div class="kpi"><div class="kpi-l">${k[0]}</div><div class="kpi-v" style="font-size:24px">${k[1]}</div>
+    <div class="kpi-d muted">${k[2]}</div></div>`).join('')}</div>
+
+  <div class="card card-p" style="margin-top:16px;border-color:var(--pine)">
+    <div class="spread" style="margin-bottom:14px">
+      <div class="row" style="color:var(--pine-600)">${ic(I.spark,17)}<span style="font-weight:700;color:var(--ink)">Что нашёл разбор</span></div>
+      <button class="btn btn-primary btn-sm">Разобрать заново</button></div>
+    ${[['В 18% диалогов спрашивали про рассрочку, но в базе знаний её условий нет.','Добавить в базу знаний'],
+       ['Вопросы про наличие конкретных размеров дают низкую уверенность — каталог обновлялся 7 дней назад.','Обновить каталог'],
+       ['12 клиентов спросили про самовывоз в Астане. Такого пункта в документах нет.','Добавить в базу знаний']]
+      .map(r=>`<div class="spread" style="padding:13px 0;border-top:1px solid var(--line);gap:16px;align-items:flex-start">
+        <p class="small">${r[0]}</p><button class="btn btn-ghost btn-sm" style="flex:none">${r[1]}</button></div>`).join('')}
+  </div>
+
+  <div class="grid" style="grid-template-columns:1fr 1fr;margin-top:16px">
+    <div class="card card-p"><div style="font-weight:700;margin-bottom:6px">Почему клиенты не покупают</div>
+      <p class="tiny muted" style="margin-bottom:16px">Ассистент разбирает переписки закрытых диалогов без покупки.</p>${rank(LOST)}</div>
+    <div class="card card-p"><div style="font-weight:700;margin-bottom:14px">Ответы с низкой уверенностью</div>
+      ${[['«Есть рассрочка на 12 месяцев?»',38],['«Когда будет 46 размер?»',44],['«Можно вернуть без чека?»',51],['«Работаете в воскресенье?»',58]]
+        .map(r=>`<div class="spread" style="padding:10px 0;border-bottom:1px solid var(--line)">
+          <span class="small">${r[0]}</span><span class="mono small" style="font-weight:700;color:var(--amber)">${r[1]}%</span></div>`).join('')}
+      <p class="tiny muted" style="margin-top:12px">Эти вопросы уходили менеджеру. Закройте их в базе знаний — ассистент начнёт отвечать сам.</p></div>
+  </div>`;
+}
+
+/* ── WhatsApp ─────────────────────────────────────────────── */
+function pgWhatsApp(){
+  return `<div class="page-narrow">
+  <div class="card card-p" style="margin-bottom:16px">
+    <div class="spread" style="margin-bottom:18px">
+      <div class="row"><span class="feat-ic" style="margin:0">${ic(I.wa,18)}</span>
+        <div><div style="font-weight:700">${S.wa.name}</div><div class="small muted mono">${S.wa.number}</div></div></div>
+      <span class="chip chip-ok"><span class="dot"></span>Подключён</span></div>
+    ${[['WhatsApp Business Account ID',S.wa.wabaId],['Phone Number ID',S.wa.phoneId],
+       ['Качество номера',S.wa.quality],['Лимит отправки',S.wa.limit],
+       ['Вебхук','Активен, последнее событие 2 мин назад'],['Токен доступа','EAAG••••••••7f2c']]
+      .map(r=>`<div class="spread" style="padding:11px 0;border-top:1px solid var(--line)">
+        <span class="small muted">${r[0]}</span><span class="small mono" style="font-weight:600">${r[1]}</span></div>`).join('')}
+    <div class="row" style="margin-top:18px;flex-wrap:wrap;gap:9px">
+      <button class="btn btn-ghost btn-sm">Проверить соединение</button>
+      <button class="btn btn-ghost btn-sm">Переподключить</button>
+      <button class="btn btn-quiet btn-sm" style="color:var(--red)">Отключить</button></div>
+  </div>
+  <div class="card card-p" style="margin-bottom:16px">
+    <div style="font-weight:700;margin-bottom:6px">Второй номер</div>
+    <p class="small muted" style="margin-bottom:14px">На тарифе «${S.company.plan}» доступно два номера. Второй можно завести под отдельный магазин или город.</p>
+    <button class="btn btn-primary btn-sm">${ic(I.plus,15)} Подключить номер</button></div>
+  <div class="card card-p" style="background:var(--amber-soft);border-color:transparent">
+    <div class="row" style="margin-bottom:8px;color:var(--amber)">${ic(I.warn,16)}<span style="font-weight:700">Про окно в 24 часа</span></div>
+    <p class="small" style="color:var(--ink-2)">Свободным текстом можно отвечать 24 часа после последнего сообщения клиента. Позже — только шаблоном, утверждённым Meta. Платформа следит за этим сама и не даст отправить то, что приведёт к штрафу по качеству номера.</p></div>
+  </div>`;
+}
+
+/* ── Интеграции ───────────────────────────────────────────── */
+function pgIntegrations(){
+  const items=[
+    ['WhatsApp Business','Официальный канал Meta','ok'],
+    ['Meta Business','Управление WABA и шаблонами','ok'],
+    ['Google Sheets','Выгрузка клиентов и заказов','no'],
+    ['Telegram','Второй канал общения','soon'],
+    ['Instagram Direct','Сообщения из Instagram','soon'],
+    ['Каспи магазин','Заказы и остатки','no'],
+    ['Сайт','Виджет чата на сайте','no'],
+    ['API и вебхуки','Своя интеграция','ok'],
+  ];
+  const badge={ok:'<span class="chip chip-ok">Подключено</span>',no:'<span class="chip">Не подключено</span>',
+    soon:'<span class="chip chip-info">В планах</span>'};
+  return `<div class="feat-grid">${items.map(i=>`<div class="feat">
+    <div class="spread" style="margin-bottom:12px"><div class="feat-ic" style="margin:0">${ic(I.plug,17)}</div>${badge[i[2]]}</div>
+    <h3>${i[0]}</h3><p>${i[1]}</p>
+    <button class="btn ${i[2]==='ok'?'btn-ghost':'btn-primary'} btn-sm" style="margin-top:14px;width:100%" ${i[2]==='soon'?'disabled':''}>
+      ${i[2]==='ok'?'Настроить':i[2]==='soon'?'Пока недоступно':'Подключить'}</button></div>`).join('')}</div>`;
+}
+
+/* ── Команда ──────────────────────────────────────────────── */
+function pgTeam(){
+  const team=[['Нұржан Ахметов','nurzhan@demostore.kz','Владелец','Активен'],
+    ['Алина Ким','alina@demostore.kz','Менеджер','Активен'],
+    ['Ержан Абдиров','yerzhan@demostore.kz','Менеджер','Активен'],
+    ['Салтанат Ким','saltanat@demostore.kz','Оператор','Приглашение отправлено']];
+  return `<div class="spread" style="margin-bottom:16px">
+    <p class="small muted">Права определяются ролью. Менеджер видит диалоги, но не может трогать номер и тариф.</p>
+    <button class="btn btn-primary">${ic(I.plus,15)} Пригласить</button></div>
+  <div class="card" style="overflow-x:auto;margin-bottom:16px"><table>
+    <thead><tr><th>Сотрудник</th><th>Почта</th><th>Роль</th><th>Статус</th><th></th></tr></thead>
+    <tbody>${team.map((t,i)=>`<tr><td><div class="row">${av(t[0],i)}<span style="font-weight:600">${t[0]}</span></div></td>
+      <td class="muted small">${t[1]}</td>
+      <td><select class="select" style="height:32px;width:auto;font-size:13px"><option>${t[2]}</option><option>Администратор</option><option>Аналитик</option></select></td>
+      <td>${t[3]==='Активен'?'<span class="chip chip-ok">Активен</span>':'<span class="chip chip-warn">Ждёт ответа</span>'}</td>
+      <td><button class="btn btn-quiet btn-sm">Убрать</button></td></tr>`).join('')}
+    </tbody></table></div>
+  <div class="card card-p"><div style="font-weight:700;margin-bottom:14px">Что может каждая роль</div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>Действие</th><th>Владелец</th><th>Админ</th><th>Менеджер</th><th>Оператор</th><th>Аналитик</th></tr></thead>
+      <tbody>${[['Отвечать в диалогах',1,1,1,1,0],['Видеть клиентов',1,1,1,1,1],
+        ['Менять инструкции AI',1,1,0,0,0],['Подключать WhatsApp',1,1,0,0,0],
+        ['Смотреть аналитику',1,1,1,0,1],['Менять тариф',1,0,0,0,0]]
+        .map(r=>`<tr><td class="small">${r[0]}</td>${r.slice(1).map(v=>`<td>${v?`<span style="color:var(--pine)">${ic(I.ok,15)}</span>`:'<span class="muted">—</span>'}</td>`).join('')}</tr>`).join('')}
+      </tbody></table></div></div>`;
+}
+</script>
+<script>
+/* ── Тариф ────────────────────────────────────────────────── */
+function pgBilling(){
+  const use=[['AI-ответы','3 847','5 000',77],['Сообщения WhatsApp','4 102','10 000',41],
+    ['Клиенты','268','нет лимита',0],['Документы базы знаний','14','нет лимита',0],['Хранилище','1,8 ГБ','10 ГБ',18]];
+  return `<div class="page-narrow">
+  <div class="card card-p" style="margin-bottom:16px">
+    <div class="spread"><div><div class="small muted">Текущий тариф</div>
+      <div style="font-family:'Unbounded',sans-serif;font-size:24px;font-weight:500;letter-spacing:-.04em;margin:5px 0">«${S.company.plan}» — 49 900 ₸ / мес</div>
+      <div class="small muted">Следующее списание 1 сентября 2026</div></div>
+      <div class="row"><button class="btn btn-ghost">Сменить тариф</button></div></div></div>
+  <div class="card card-p" style="margin-bottom:16px">
+    <div style="font-weight:700;margin-bottom:16px">Использование в этом месяце</div>
+    ${use.map(u=>`<div style="margin-bottom:15px">
+      <div class="spread small" style="margin-bottom:5px"><span>${u[0]}</span>
+        <span class="mono" style="font-weight:600">${u[1]} <span class="muted">/ ${u[2]}</span></span></div>
+      ${u[3]?`<div style="height:6px;background:var(--surface-2);border-radius:3px">
+        <div style="height:100%;width:${u[3]}%;background:${u[3]>=80?'var(--amber)':'var(--pine)'};border-radius:3px"></div></div>`:''}
+      </div>`).join('')}
+    <div class="card card-p" style="background:var(--amber-soft);border-color:transparent;margin-top:6px">
+      <div class="row" style="color:var(--amber)">${ic(I.warn,15)}
+        <span class="small">Использовано 77% AI-ответов. При 100% ассистент перестанет отвечать до следующего периода — можно поднять лимит заранее.</span></div></div></div>
+  <div class="card" style="overflow:hidden">
+    <div class="card-p" style="border-bottom:1px solid var(--line);font-weight:700">История платежей</div>
+    <table><tbody>${[['1 августа 2026','49 900 ₸','Оплачен'],['1 июля 2026','49 900 ₸','Оплачен'],['1 июня 2026','19 900 ₸','Оплачен']]
+      .map(r=>`<tr><td class="muted">${r[0]}</td><td class="mono" style="font-weight:600">${r[1]}</td>
+      <td><span class="chip chip-ok">${r[2]}</span></td><td style="text-align:right"><button class="btn btn-quiet btn-sm">Счёт</button></td></tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+
+/* ── Настройки ────────────────────────────────────────────── */
+let setTab='company';
+function pgSettings(){
+  const tabs=[['company','Компания'],['profile','Профиль'],['notify','Уведомления'],['security','Безопасность'],['api','API и вебхуки'],['log','Журнал действий']];
+  let body='';
+  if(setTab==='company') body=`<div class="card card-p">
+    <label class="field"><span class="label">Название</span><input class="input" value="Demo Store"></label>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px">
+      <label class="field"><span class="label">Город</span><input class="input" value="Алматы"></label>
+      <label class="field"><span class="label">Часовой пояс</span><select class="select"><option>Asia/Almaty (UTC+5)</option></select></label></div>
+    <label class="field"><span class="label">Сайт</span><input class="input" placeholder="demostore.kz"></label>
+    <label class="field"><span class="label">Описание</span><textarea class="textarea">Продаём оригинальные кроссовки и кеды. Три магазина в Алматы, доставка по Казахстану.</textarea></label>
+    <button class="btn btn-primary">Сохранить</button></div>`;
+  else if(setTab==='profile') body=`<div class="card card-p">
+    <div class="row" style="margin-bottom:20px"><div class="avatar" style="width:56px;height:56px;font-size:18px;background:var(--blue)">${S.user.initials}</div>
+      <button class="btn btn-ghost btn-sm">Загрузить фото</button></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px">
+      <label class="field"><span class="label">Имя</span><input class="input" value="Нұржан"></label>
+      <label class="field"><span class="label">Фамилия</span><input class="input" value="Ахметов"></label></div>
+    <label class="field"><span class="label">Почта</span><input class="input" value="nurzhan@demostore.kz"></label>
+    <label class="field"><span class="label">Телефон</span><input class="input" value="+7 707 512 44 90"></label>
+    <button class="btn btn-primary">Сохранить</button></div>`;
+  else if(setTab==='notify') body=`<div class="card card-p">
+    ${[['Ассистент передал диалог',1],['Новый лид',1],['Ошибка WhatsApp',1],['Приближается лимит тарифа',1],
+       ['Новый клиент',0],['Ежедневная сводка',1]].map(r=>`
+      <div class="spread" style="padding:12px 0;border-bottom:1px solid var(--line)">
+        <span class="small">${r[0]}</span><div class="switch ${r[1]?'on':''}"></div></div>`).join('')}
+    <p class="hint" style="margin-top:14px">Уведомления приходят на почту и в панель. Телеграм-бот появится вместе с интеграцией.</p></div>`;
+  else if(setTab==='security') body=`<div class="card card-p" style="margin-bottom:14px">
+      <div style="font-weight:700;margin-bottom:14px">Пароль</div>
+      <label class="field"><span class="label">Текущий</span><input class="input" type="password"></label>
+      <label class="field"><span class="label">Новый</span><input class="input" type="password"></label>
+      <button class="btn btn-primary btn-sm">Сменить пароль</button></div>
+    <div class="card card-p" style="margin-bottom:14px"><div class="spread">
+      <div><div style="font-weight:700">Двухфакторный вход</div>
+        <p class="small muted" style="margin-top:4px">Код из приложения в дополнение к паролю.</p></div>
+      <button class="btn btn-ghost btn-sm">Включить</button></div></div>
+    <div class="card card-p"><div style="font-weight:700;margin-bottom:12px">Активные сессии</div>
+      ${[['Chrome · macOS · Алматы','сейчас',1],['Safari · iPhone · Алматы','вчера',0]].map(r=>`
+      <div class="spread" style="padding:10px 0;border-top:1px solid var(--line)">
+        <div><div class="small" style="font-weight:600">${r[0]}</div><div class="tiny muted">${r[1]}</div></div>
+        ${r[2]?'<span class="chip chip-ok">Это устройство</span>':'<button class="btn btn-quiet btn-sm">Завершить</button>'}</div>`).join('')}</div>`;
+  else if(setTab==='api') body=`<div class="card card-p" style="margin-bottom:14px">
+      <div class="spread" style="margin-bottom:14px"><div style="font-weight:700">Ключи API</div>
+        <button class="btn btn-primary btn-sm">Создать ключ</button></div>
+      <div class="spread" style="padding:12px 0;border-top:1px solid var(--line)">
+        <div><div class="small mono" style="font-weight:600">zrd_live_••••••••3f9a</div>
+          <div class="tiny muted">Создан 2 августа · последний запрос 3 часа назад</div></div>
+        <button class="btn btn-quiet btn-sm" style="color:var(--red)">Отозвать</button></div>
+      <p class="hint">Ключ показывается целиком один раз при создании. Потерянный ключ не восстанавливается — только выпуск нового.</p></div>
+    <div class="card card-p"><div class="spread" style="margin-bottom:14px"><div style="font-weight:700">Вебхуки</div>
+      <button class="btn btn-ghost btn-sm">${ic(I.plus,14)} Добавить</button></div>
+      ${[['https://demostore.kz/hooks/Simple','message.received, lead.created','Активен'],
+         ['https://crm.demostore.kz/in','order.created','Ошибка доставки']].map(r=>`
+      <div class="spread" style="padding:12px 0;border-top:1px solid var(--line)">
+        <div style="min-width:0"><div class="small mono" style="font-weight:600;overflow:hidden;text-overflow:ellipsis">${r[0]}</div>
+          <div class="tiny muted">${r[1]}</div></div>
+        <span class="chip ${r[2]==='Активен'?'chip-ok':'chip-bad'}">${r[2]}</span></div>`).join('')}</div>`;
+  else body=`<div class="card" style="overflow-x:auto"><table>
+    <thead><tr><th>Когда</th><th>Кто</th><th>Действие</th><th>IP</th></tr></thead>
+    <tbody>${[['сегодня 09:14','Нұржан Ахметов','Загрузил документ «Адреса магазинов.txt»','92.47.•••.12'],
+      ['сегодня 08:52','Алина Ким','Забрала диалог с клиентом Данияр Ким','188.94.•••.7'],
+      ['вчера 18:30','Нұржан Ахметов','Изменил инструкцию ассистента','92.47.•••.12'],
+      ['вчера 17:02','Нұржан Ахметов','Пригласил сотрудника saltanat@demostore.kz','92.47.•••.12'],
+      ['16 авг 11:20','Система','Подключён номер +7 707 512 44 90','—']]
+      .map(r=>`<tr><td class="muted small">${r[0]}</td><td style="font-weight:600" class="small">${r[1]}</td>
+      <td class="small">${r[2]}</td><td class="mono tiny muted">${r[3]}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  return `<div class="page-narrow"><div class="tabs">${tabs.map(t=>`
+    <button class="tab ${setTab===t[0]?'on':''}" onclick="setTab='${t[0]}';render()">${t[1]}</button>`).join('')}</div>${body}</div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   МАРШРУТИЗАЦИЯ
+   ═══════════════════════════════════════════════════════════ */
+const PAGES = {
+  '':          ['Обзор',            pgDashboard,   0],
+  'conversations':['Диалоги',       pgInbox,       1],
+  'customers': ['Клиенты',          pgCustomers,   0],
+  'leads':     ['Лиды',             pgLeads,       0],
+  'products':  ['Товары',           pgProducts,    0],
+  'assistant': ['Ассистент',        pgAssistant,   0],
+  'prompt':    ['Инструкции',       pgPrompt,      0],
+  'knowledge': ['База знаний',      pgKnowledge,   0],
+  'playground':['Тестовый чат',     pgPlayground,  1],
+  'analytics': ['Аналитика',        pgAnalytics,   0],
+  'ai-analytics':['Работа ассистента',pgAiAnalytics,0],
+  'whatsapp':  ['WhatsApp',         pgWhatsApp,    0],
+  'integrations':['Интеграции',     pgIntegrations,0],
+  'team':      ['Команда',          pgTeam,        0],
+  'billing':   ['Тариф и оплата',   pgBilling,     0],
+  'settings':  ['Настройки',        pgSettings,    0],
+};
+
+function render(){
+  const h = (location.hash || '#/').slice(2);
+  const parts = h.split('/').filter(Boolean);
+  let html;
+  if(parts[0] === 'app'){
+    route = parts[1] || '';
+    const p = PAGES[route] || PAGES[''];
+    html = shell(p[1](), p[0], p[2]);
+  } else if(parts[0] === 'login')       html = viewLogin();
+  else if(parts[0] === 'register')      html = viewRegister();
+  else if(parts[0] === 'onboarding')    html = viewOnboarding();
+  else                                  html = viewLanding();
+  el.innerHTML = html;
+}
+window.addEventListener('hashchange', ()=>{ sideOpen=false; render();
+  const id=location.hash.split('#')[2];
+  if(id){ const t=document.getElementById(id); if(t) t.scrollIntoView({behavior:'smooth'}); }
+  else window.scrollTo(0,0);
+});
+render();
+</script>
+</body>
+</html>
