@@ -71,6 +71,13 @@ export default async function WhatsAppPage() {
                   </div>
                 ))}
 
+                {n.status === 'ERROR' && (
+                  <div className="chip chip-bad" style={{ height: 'auto', padding: '9px 12px', marginTop: 14, display: 'block' }}>
+                    Meta отклонила токен этого номера — ассистент и менеджеры сейчас не могут отвечать.
+                    Подключите номер заново ниже («Подключить вручную») с новым постоянным токеном.
+                  </div>
+                )}
+
                 {n.status !== 'DISCONNECTED' && (
                   <form action={disconnectNumber.bind(null, n.id)} style={{ marginTop: 16 }}>
                     <button className="btn btn-quiet btn-sm" style={{ color: 'var(--red)' }} type="submit">

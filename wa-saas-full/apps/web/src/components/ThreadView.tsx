@@ -10,8 +10,21 @@ type Message = {
   authorType: 'CUSTOMER' | 'AI' | 'MANAGER' | 'SYSTEM';
   text: string | null;
   type: string;
+  status: 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
+  errorCode: string | null;
   createdAt: Date;
 };
+
+/** Как в самом WhatsApp: одна галочка — отправлено, две — доставлено, синие — прочитано. */
+function Ticks({ status, errorCode }: { status: Message['status']; errorCode: string | null }) {
+  if (status === 'FAILED') {
+    return <span style={{ color: 'var(--red)', fontWeight: 700 }} title={errorCode ? `Код Meta ${errorCode}` : undefined}> · не доставлено</span>;
+  }
+  if (status === 'READ') return <span style={{ color: '#3B9EE8' }} title="Прочитано"> ✓✓</span>;
+  if (status === 'DELIVERED') return <span title="Доставлено"> ✓✓</span>;
+  if (status === 'SENT') return <span title="Отправлено"> ✓</span>;
+  return <span title="Отправляется"> ⏱</span>;
+}
 
 type Conversation = {
   id: string;
@@ -107,6 +120,7 @@ export function ThreadView({
               <span className="msg-t">
                 {clockWithDay(m.createdAt)}
                 {AUTHOR[m.authorType] ? ` · ${AUTHOR[m.authorType]}` : ''}
+                {m.direction === 'OUTBOUND' && <Ticks status={m.status} errorCode={m.errorCode} />}
               </span>
             </div>
           ),

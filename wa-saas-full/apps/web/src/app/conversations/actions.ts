@@ -2,8 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireCompany } from '@/lib/session';
-import { getProvider } from '@wa/whatsapp';
-import { assertCanSendFreeText } from '@wa/core';
+import { assertCanSendFreeText, sendWhatsAppText, markWhatsAppRead, sendErrorText } from '@wa/core';
 
 /**
  * Переключение режима диалога. Системное сообщение пишется только если
@@ -74,15 +73,17 @@ export async function sendMessage(conversationId: string, text: string) {
 
   let providerMessageId: string;
   try {
-    const result = await getProvider().sendText({
-      phoneNumberId: conversation.phoneNumber.phoneNumberId,
+    const result = await sendWhatsAppText(db, {
+      phoneNumberRowId: conversation.phoneNumber.id,
       to: conversation.customer.waId,
       text: body,
+      retries: 1,
     });
     providerMessageId = result.providerMessageId;
   } catch (error) {
-    console.error('[send] провайдер вернул ошибку', error);
-    return { ok: false as const, error: 'Не удалось отправить сообщение. Попробуйте ещё раз.' };
+    console.error('[send] WhatsApp не принял сообщение:', (error as Error).message);
+    // Текст причины — от Meta, переведённый: окно 24 часа, истёкший токен и т.п.
+    return { ok: false as const, error: sendErrorText(error) };
   }
 
   const now = new Date();
@@ -116,5 +117,25 @@ export async function markRead(conversationId: string) {
     data: { unreadCount: 0 },
   });
   // Без лишней перерисовки, если читать было нечего.
-  if (count > 0) revalidatePath('/conversations');
+  if (count === 0) return;
+
+  // Клиенту — синие галочки: менеджер открыл переписку.
+  const conversation = await db.conversation.findFirst({
+    where: { id: conversationId },
+    select: {
+      phoneNumberId: true,
+      messages: {
+        where: { direction: 'INBOUND', providerMessageId: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { providerMessageId: true },
+      },
+    },
+  });
+  const last = conversation?.messages[0]?.providerMessageId;
+  if (conversation?.phoneNumberId && last) {
+    await markWhatsAppRead(db, { phoneNumberRowId: conversation.phoneNumberId, providerMessageId: last });
+  }
+
+  revalidatePath('/conversations');
 }

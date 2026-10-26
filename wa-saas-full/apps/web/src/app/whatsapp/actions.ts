@@ -4,8 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { requireCompany } from '@/lib/session';
 import { encryptSecret } from '@wa/core';
 import { prisma } from '@wa/db';
+import { getProvider, graphBase, WhatsAppSendError, type PhoneNumberInfo } from '@wa/whatsapp';
 
-const GRAPH = 'https://graph.facebook.com/v24.0';
+const GRAPH = graphBase();
 
 /* ─────────────────────────────────────────────────────────────
    Шаг 1: проверка номера до запуска Embedded Signup
@@ -224,17 +225,59 @@ export async function connectNumber(formData: FormData) {
 
   const wabaId = String(formData.get('wabaId') ?? '').trim();
   const phoneNumberId = String(formData.get('phoneNumberId') ?? '').trim();
-  const displayPhoneNumber = String(formData.get('displayPhoneNumber') ?? '').trim();
+  let displayPhoneNumber = String(formData.get('displayPhoneNumber') ?? '').trim();
   const token = String(formData.get('token') ?? '').trim();
+  const pin = String(formData.get('pin') ?? '').trim();
 
-  if (!wabaId || !phoneNumberId || !displayPhoneNumber || !token) {
+  const live = getProvider().name === 'cloud';
+
+  if (!wabaId || !phoneNumberId || !token || (!live && !displayPhoneNumber)) {
     return { ok: false as const, error: 'Заполните все поля' };
   }
   if (!/^\d{5,25}$/.test(wabaId) || !/^\d{5,25}$/.test(phoneNumberId)) {
     return { ok: false as const, error: 'WABA ID и Phone Number ID состоят только из цифр — скопируйте их из WhatsApp Manager' };
   }
+  if (pin && !/^\d{6}$/.test(pin)) {
+    return { ok: false as const, error: 'PIN — это 6 цифр двухэтапной проверки номера' };
+  }
   if (await numberOwnedByOther(phoneNumberId, company.id)) {
     return { ok: false as const, error: 'Этот Phone Number ID уже подключён к другой компании на платформе' };
+  }
+
+  // Боевой режим: прежде чем сохранять, спрашиваем Meta. Иначе опечатка
+  // в токене всплыла бы только на первом клиенте, которому бот не ответил.
+  let info: PhoneNumberInfo | null = null;
+  if (live) {
+    const provider = getProvider();
+    try {
+      info = await provider.getPhoneNumber({ phoneNumberId, accessToken: token });
+    } catch (error) {
+      const text = error instanceof WhatsAppSendError ? error.userMessage : 'Meta не ответила — попробуйте ещё раз.';
+      return { ok: false as const, error: `Проверка номера в Meta не прошла: ${text}` };
+    }
+
+    if (pin) {
+      try {
+        await provider.registerNumber({ phoneNumberId, pin, accessToken: token });
+      } catch (error) {
+        // Номер уже зарегистрирован — это не ошибка подключения.
+        const msg = (error as Error).message.toLowerCase();
+        if (!msg.includes('already') && !msg.includes('уже')) {
+          const text = error instanceof WhatsAppSendError ? error.userMessage : 'регистрация не удалась';
+          return { ok: false as const, error: `Регистрация номера в Cloud API не прошла: ${text}` };
+        }
+      }
+    }
+
+    try {
+      // Без подписки Meta не пришлёт ни одного входящего сообщения.
+      await provider.subscribeApp({ wabaId, accessToken: token });
+    } catch (error) {
+      const text = error instanceof WhatsAppSendError ? error.userMessage : 'подписка не удалась';
+      return { ok: false as const, error: `Не удалось подписать WhatsApp-аккаунт на входящие: ${text} Проверьте, что WABA ID верный.` };
+    }
+
+    displayPhoneNumber = info.displayPhoneNumber || displayPhoneNumber;
   }
 
   let encrypted: string;
@@ -248,31 +291,38 @@ export async function connectNumber(formData: FormData) {
   const account = existing
     ? (await db.whatsAppAccount.updateMany({
         where: { id: existing.id },
-        data: { accessToken: encrypted, status: 'CONNECTED' },
+        data: { accessToken: encrypted, status: 'CONNECTED', lastCheckedAt: new Date() },
       }),
       existing)
     : await db.whatsAppAccount.create({
-        data: { wabaId, accessToken: encrypted, connectedVia: 'MANUAL', status: 'CONNECTED' } as never,
+        data: { wabaId, accessToken: encrypted, connectedVia: 'MANUAL', status: 'CONNECTED', lastCheckedAt: new Date() } as never,
       });
+
+  const details = {
+    displayPhoneNumber,
+    verifiedName: info?.verifiedName ?? undefined,
+    qualityRating: info?.qualityRating ?? undefined,
+    messagingLimit: info?.messagingLimit ?? undefined,
+    status: 'CONNECTED' as const,
+    ...(live ? { webhookVerifiedAt: new Date() } : {}),
+  };
 
   const number = await db.whatsAppPhoneNumber.findFirst({ where: { phoneNumberId } });
   if (number) {
-    await db.whatsAppPhoneNumber.updateMany({
-      where: { id: number.id },
-      data: { displayPhoneNumber, status: 'CONNECTED' },
-    });
+    // Номер могли перенести в другой WABA — привязываем к актуальному.
+    await db.whatsAppPhoneNumber.updateMany({ where: { id: number.id }, data: { ...details, accountId: account.id } });
   } else {
     await db.whatsAppPhoneNumber.create({
-      data: { accountId: account.id, phoneNumberId, displayPhoneNumber, status: 'CONNECTED' } as never,
+      data: { accountId: account.id, phoneNumberId, ...details } as never,
     });
   }
 
   await db.auditLog.create({
-    data: { action: 'whatsapp.number.connected', actorUserId: user.id, entityType: 'WhatsAppPhoneNumber', entityId: phoneNumberId, metadata: { via: 'manual' } } as never,
+    data: { action: 'whatsapp.number.connected', actorUserId: user.id, entityType: 'WhatsAppPhoneNumber', entityId: phoneNumberId, metadata: { via: 'manual', live } } as never,
   });
 
   revalidatePath('/whatsapp');
-  return { ok: true as const };
+  return { ok: true as const, display: displayPhoneNumber, verifiedName: info?.verifiedName ?? null };
 }
 
 export async function disconnectNumber(numberId: string) {

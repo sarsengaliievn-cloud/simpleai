@@ -114,10 +114,11 @@ AUTH_SECRET="$(gen)"
 # должны будут подключать номера заново.
 ENCRYPTION_KEY="$(gen)"
 
-WHATSAPP_PROVIDER="mock"
+# Боевой WhatsApp. Пока номер не подключён в панели, отправлять просто некуда.
+WHATSAPP_PROVIDER="cloud"
 META_APP_ID=""
-# Как только впишете секрет приложения Meta, вебхук начнёт пускать
-# только запросы с подписью Meta. До этого он открыт — не публикуйте адрес.
+# Секрет приложения Meta (App settings → Basic → App secret). Без него
+# вебхук в боевом режиме отклоняет все запросы — входящие не придут.
 META_APP_SECRET=""
 META_CONFIG_ID=""
 META_WEBHOOK_VERIFY_TOKEN="$(openssl rand -hex 16)"

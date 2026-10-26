@@ -1,5 +1,5 @@
 import { prisma, forCompany } from '@wa/db';
-import { getProvider, type InboundMessage } from '@wa/whatsapp';
+import { getProvider, type InboundMessage, type StatusUpdate } from '@wa/whatsapp';
 import { windowExpiryFrom, type InboundMessageJob } from '@wa/core';
 import { generateAiReply } from './ai-reply.js';
 
@@ -21,7 +21,9 @@ export async function processInboundMessage({ webhookEventId }: InboundMessageJo
   });
 
   try {
-    const messages = getProvider().parseWebhook(event.payload);
+    const provider = getProvider();
+    const messages = provider.parseWebhook(event.payload);
+    const statuses = provider.parseStatuses(event.payload);
     let companyId: string | null = null;
     let handled = 0;
 
@@ -31,6 +33,27 @@ export async function processInboundMessage({ webhookEventId }: InboundMessageJo
         companyId = owner;
         handled += 1;
       }
+    }
+
+    // Статусы «доставлено / прочитано / не доставлено» для наших сообщений.
+    let missing = 0;
+    for (const status of statuses) {
+      const owner = await handleStatus(status);
+      if (owner === 'missing') missing += 1;
+      else if (owner) {
+        companyId = owner;
+        handled += 1;
+      }
+    }
+
+    // Meta может прислать «доставлено» раньше, чем мы успели записать своё
+    // исходящее сообщение. Свежее событие — повторяем позже (BullMQ, с паузой).
+    // Старое — значит, сообщение отправлено не через нас, игнорируем.
+    // event прочитан до увеличения счётчика: это номер текущей попытки.
+    const attempt = event.attempts + 1;
+    const fresh = Date.now() - event.receivedAt.getTime() < 120_000 && attempt < 3;
+    if (missing > 0 && fresh) {
+      throw new Error(`статус пришёл раньше сообщения (${missing}), повтор`);
     }
 
     await prisma.webhookEvent.update({
@@ -50,6 +73,51 @@ export async function processInboundMessage({ webhookEventId }: InboundMessageJo
     }).catch(() => {});
     throw error;
   }
+}
+
+const RANK = { PENDING: 0, SENT: 1, DELIVERED: 2, READ: 3, FAILED: 4 } as const;
+type Status = keyof typeof RANK;
+
+/**
+ * Статусы приходят не по порядку: «прочитано» может прийти раньше
+ * «доставлено». Двигаем статус только вперёд — иначе прочитанное
+ * сообщение откатилось бы в «доставлено».
+ */
+async function handleStatus(update: StatusUpdate): Promise<string | 'missing' | null> {
+  const message = await prisma.message.findFirst({
+    where: { providerMessageId: update.providerMessageId, direction: 'OUTBOUND' },
+    select: { id: true, companyId: true, conversationId: true },
+  });
+  if (!message) return 'missing';
+
+  // Статус должен прийти на номер той же компании, что отправила сообщение.
+  const number = await prisma.whatsAppPhoneNumber.findUnique({ where: { phoneNumberId: update.phoneNumberId } });
+  if (!number || number.companyId !== message.companyId) return null;
+
+  const next = update.status.toUpperCase() as Status;
+  const lower = (Object.keys(RANK) as Status[]).filter((s) => RANK[s] < RANK[next]);
+  const db = forCompany(prisma, message.companyId);
+
+  const { count } = await db.message.updateMany({
+    where: { id: message.id, status: { in: lower } },
+    data: { status: next, ...(next === 'FAILED' ? { errorCode: update.errorCode ?? 'unknown' } : {}) },
+  });
+
+  // Не доставлено — менеджер должен это увидеть в переписке, а не гадать.
+  if (count > 0 && next === 'FAILED') {
+    await db.message.create({
+      data: {
+        conversationId: message.conversationId,
+        direction: 'OUTBOUND',
+        authorType: 'SYSTEM',
+        text: `Сообщение не доставлено клиенту${update.errorTitle ? `: ${update.errorTitle}` : ''}${update.errorCode ? ` (код ${update.errorCode})` : ''}`,
+        status: 'SENT',
+        sentAt: new Date(),
+      } as never,
+    });
+  }
+
+  return message.companyId;
 }
 
 /** Возвращает companyId, если сообщение принято, иначе null. */

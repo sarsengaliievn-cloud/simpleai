@@ -4,6 +4,8 @@ import type {
   OutboundTemplateMessage,
   SendResult,
   InboundMessage,
+  StatusUpdate,
+  PhoneNumberInfo,
 } from './types.js';
 import { verifyMetaSignature } from './signature.js';
 
@@ -42,6 +44,54 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
   parseWebhook(payload: unknown): InboundMessage[] {
     return parseMetaWebhook(payload);
   }
+
+  parseStatuses(payload: unknown): StatusUpdate[] {
+    return parseMetaStatuses(payload);
+  }
+
+  async markRead() {}
+
+  async getPhoneNumber(input: { phoneNumberId: string }): Promise<PhoneNumberInfo> {
+    return { displayPhoneNumber: input.phoneNumberId, verifiedName: null, qualityRating: null, messagingLimit: null };
+  }
+
+  async subscribeApp() {}
+
+  async registerNumber() {}
+}
+
+/** Время Meta — секунды строкой. Битое значение не должно ронять запись в базу. */
+function metaTime(value: unknown): Date {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? new Date(n * 1000) : new Date();
+}
+
+export function parseMetaStatuses(payload: unknown): StatusUpdate[] {
+  const result: StatusUpdate[] = [];
+  const body = payload as any;
+  const allowed = new Set(['sent', 'delivered', 'read', 'failed']);
+
+  for (const entry of body?.entry ?? []) {
+    for (const change of entry?.changes ?? []) {
+      const value = change?.value;
+      const phoneNumberId = value?.metadata?.phone_number_id;
+      if (!phoneNumberId) continue;
+
+      for (const s of value?.statuses ?? []) {
+        if (!s?.id || !allowed.has(s.status)) continue;
+        result.push({
+          providerMessageId: s.id,
+          phoneNumberId,
+          status: s.status,
+          timestamp: metaTime(s.timestamp),
+          errorCode: s.errors?.[0]?.code !== undefined ? String(s.errors[0].code) : undefined,
+          errorTitle: s.errors?.[0]?.title ?? s.errors?.[0]?.message,
+        });
+      }
+    }
+  }
+
+  return result;
 }
 
 export function parseMetaWebhook(payload: unknown): InboundMessage[] {
@@ -54,7 +104,13 @@ export function parseMetaWebhook(payload: unknown): InboundMessage[] {
       const phoneNumberId = value?.metadata?.phone_number_id;
       if (!phoneNumberId) continue;
 
-      const profileName = value?.contacts?.[0]?.profile?.name;
+      // Имена приходят списком contacts — сопоставляем по номеру, а не берём
+      // первое: в одной пачке могут быть сообщения от разных клиентов.
+      const names = new Map<string, string>();
+      for (const c of value?.contacts ?? []) {
+        if (c?.wa_id && c?.profile?.name) names.set(String(c.wa_id), String(c.profile.name));
+      }
+      const fallbackName: string | undefined = value?.contacts?.[0]?.profile?.name;
 
       for (const message of value?.messages ?? []) {
         if (!message?.id || !message?.from) continue;
@@ -71,7 +127,7 @@ export function parseMetaWebhook(payload: unknown): InboundMessage[] {
           providerMessageId: message.id,
           phoneNumberId,
           from: message.from,
-          profileName,
+          profileName: names.get(String(message.from)) ?? (names.size === 0 ? fallbackName : undefined),
           type: replyText
             ? 'text'
             : ['text', 'image', 'audio', 'video', 'document', 'location'].includes(type)
@@ -81,7 +137,7 @@ export function parseMetaWebhook(payload: unknown): InboundMessage[] {
           text: message.text?.body ?? replyText ?? message[type]?.caption,
           mediaId: message[type]?.id,
           mediaMimeType: message[type]?.mime_type,
-          timestamp: new Date(Number(message.timestamp) * 1000),
+          timestamp: metaTime(message.timestamp),
         });
       }
     }

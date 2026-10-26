@@ -90,15 +90,41 @@ curl -fsSL https://raw.githubusercontent.com/sarsengaliievn-cloud/simpleai/main/
 cat /opt/saudabot/wa-saas-full/.env.production
 ```
 
-## 6. Подключение Meta (когда дойдёт до живого WhatsApp)
+## 6. Подключение своего номера WhatsApp (Meta)
 
-В приложении Meta → WhatsApp → Configuration → Webhook:
+Это для **своего** номера. Чтобы клиенты подключали свои номера сами кнопкой
+«Войти через Meta», нужен статус Tech Provider — заявка подаётся отдельно.
+
+**6.1. Приложение Meta** — https://developers.facebook.com → My Apps → Create App →
+тип **Business** → привязать к своему Business-аккаунту → добавить продукт **WhatsApp**.
+
+**6.2. Секрет приложения** — App settings → Basic → **App secret** → «Показать».
+Вписать на сервере в `.env.production`: `META_APP_SECRET="..."`, затем `deploy/update.sh`.
+
+**6.3. Вебхук** — WhatsApp → Configuration → Webhook → Edit:
 - **Callback URL:** `https://app.saudabot.kz/api/webhooks/whatsapp`
 - **Verify token:** значение `META_WEBHOOK_VERIFY_TOKEN` из `.env.production`
+- Verify and save → в списке полей подписаться на **messages**.
 
-Затем впишите в `.env.production` значения `META_APP_ID`, `META_APP_SECRET` и
-`META_CONFIG_ID` (после одобрения Tech Provider) и выполните `deploy/update.sh`.
-С заданным `META_APP_SECRET` вебхук пускает только запросы с подписью Meta.
+**6.4. Номер** — WhatsApp → API Setup → Add phone number. Номер не должен быть
+привязан к обычному WhatsApp (или его сначала удаляют из приложения).
+Скопировать **Phone number ID** и **WhatsApp Business Account ID**.
+
+**6.5. Постоянный токен** — business.facebook.com → Business Settings → Users →
+**System users** → Add (роль Admin) → Add assets: приложение + WhatsApp-аккаунт
+(Full control) → **Generate new token**: приложение, срок «Never», разрешения
+`whatsapp_business_messaging` и `whatsapp_business_management`.
+Временный токен из API Setup живёт 24 часа — для работы не подходит.
+
+**6.6. Подключить в панели** — WhatsApp → «Подключить вручную»: WABA ID,
+Phone Number ID, токен. Если номер новый — придумать **PIN** из 6 цифр (сохранить!).
+Панель проверит номер в Meta, зарегистрирует его и подпишет на входящие.
+
+**6.7. Проверка** — написать на номер с личного телефона. Сообщение появится в
+«Диалогах», ассистент ответит (если включён и в базе знаний есть ответ).
+
+> Пока аккаунт Meta не прошёл верификацию бизнеса, можно писать первым не
+> больше чем 250 клиентам в сутки. Отвечать на входящие можно без ограничений.
 
 ---
 

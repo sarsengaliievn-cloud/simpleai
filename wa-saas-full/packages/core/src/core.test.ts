@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { parseMetaWebhook, verifyMetaSignature } from '@wa/whatsapp';
+import { parseMetaWebhook, parseMetaStatuses, verifyMetaSignature, CloudApiWhatsAppProvider, WhatsAppSendError } from '@wa/whatsapp';
 import { chunkText } from './ai/chunk.js';
 import { normalizeHistory } from './ai/rag.js';
 import { buildSystemPrompt } from './ai/prompt.js';
@@ -111,5 +111,88 @@ describe('вебхук Meta', () => {
       entry: [{ changes: [{ value: { metadata: { phone_number_id: '123' }, statuses: [{ id: 'x', status: 'read' }] } }] }],
     });
     expect(parsed).toEqual([]);
+  });
+});
+
+describe('WhatsApp Cloud API', () => {
+  const realFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const reply = (status: number, body: unknown) =>
+    (globalThis.fetch = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch);
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    calls.length = 0;
+  });
+
+  it('отправляет текст с токеном компании и возвращает id Meta', async () => {
+    reply(200, { messages: [{ id: 'wamid.OK' }] });
+    const res = await new CloudApiWhatsAppProvider().sendText({ phoneNumberId: '123', to: '77010000000', text: 'Привет', accessToken: 'TOKEN' });
+    expect(res.providerMessageId).toBe('wamid.OK');
+    expect(calls[0]!.url).toMatch(/\/123\/messages$/);
+    expect((calls[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer TOKEN');
+    expect(JSON.parse(String(calls[0]!.init.body))).toMatchObject({ messaging_product: 'whatsapp', to: '77010000000', type: 'text', text: { body: 'Привет' } });
+  });
+
+  it('ошибки Meta переводятся в понятный текст', async () => {
+    const p = new CloudApiWhatsAppProvider();
+    const send = () => p.sendText({ phoneNumberId: '1', to: '2', text: 'x', accessToken: 't' });
+
+    reply(401, { error: { code: 190, message: 'Error validating access token' } });
+    await expect(send()).rejects.toMatchObject({ code: '190', authProblem: true, retryable: false });
+
+    reply(400, { error: { code: 131047, message: 'Re-engagement message' } });
+    await expect(send()).rejects.toMatchObject({ code: '131047', userMessage: expect.stringContaining('24 часов') });
+
+    reply(429, { error: { code: 130429, message: 'Rate limit hit' } });
+    await expect(send()).rejects.toMatchObject({ retryable: true });
+  });
+
+  it('без токена ничего не отправляет', async () => {
+    reply(200, {});
+    await expect(new CloudApiWhatsAppProvider().sendText({ phoneNumberId: '1', to: '2', text: 'x' })).rejects.toBeInstanceOf(WhatsAppSendError);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('без секрета приложения вебхук закрыт', () => {
+    const before = process.env.META_APP_SECRET;
+    delete process.env.META_APP_SECRET;
+    expect(new CloudApiWhatsAppProvider().verifySignature('{}', 'sha256=00')).toBe(false);
+    if (before !== undefined) process.env.META_APP_SECRET = before;
+  });
+
+  it('статусы разбираются вместе с кодом ошибки', () => {
+    const statuses = parseMetaStatuses({
+      entry: [{ changes: [{ value: {
+        metadata: { phone_number_id: '123' },
+        statuses: [
+          { id: 'wamid.A', status: 'read', timestamp: '1700000000' },
+          { id: 'wamid.B', status: 'failed', timestamp: '1700000001', errors: [{ code: 131026, title: 'Message undeliverable' }] },
+          { id: 'wamid.C', status: 'weird' },
+        ],
+      } }] }],
+    });
+    expect(statuses.map((s) => [s.providerMessageId, s.status, s.errorCode ?? null])).toEqual([
+      ['wamid.A', 'read', null],
+      ['wamid.B', 'failed', '131026'],
+    ]);
+  });
+
+  it('имя клиента берётся по его номеру, а не первое в списке', () => {
+    const parsed = parseMetaWebhook({
+      entry: [{ changes: [{ value: {
+        metadata: { phone_number_id: '123' },
+        contacts: [{ wa_id: '7701', profile: { name: 'Айгерим' } }, { wa_id: '7702', profile: { name: 'Данияр' } }],
+        messages: [
+          { id: 'a', from: '7702', type: 'text', text: { body: 'привет' }, timestamp: '1700000000' },
+          { id: 'b', from: '7701', type: 'text', text: { body: 'салем' } },
+        ],
+      } }] }],
+    });
+    expect(parsed.map((m) => m.profileName)).toEqual(['Данияр', 'Айгерим']);
+    expect(Number.isNaN(parsed[1]!.timestamp.getTime())).toBe(false);
   });
 });

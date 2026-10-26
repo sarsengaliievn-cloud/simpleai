@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { prisma } from '@wa/db';
 import { getProvider } from '@wa/whatsapp';
 import { inboundMessageQueue, JOB_CLEANUP } from '@/lib/queue';
@@ -52,13 +53,21 @@ export async function POST(request: Request) {
     return new Response('bad request', { status: 400 });
   }
 
-  // Статусы доставки (sent/delivered/read) сюда тоже приходят, но
-  // сообщений в них нет — подтверждаем и выходим.
-  const messages = getProvider().parseWebhook(payload);
-  if (messages.length === 0) return new Response('ok', { status: 200 });
+  // В одном вебхуке могут быть и сообщения клиентов, и статусы наших
+  // сообщений (отправлено / доставлено / прочитано). Обработка — в воркере.
+  const provider = getProvider();
+  const messages = provider.parseWebhook(payload);
+  const statuses = provider.parseStatuses(payload);
+  if (messages.length === 0 && statuses.length === 0) return new Response('ok', { status: 200 });
 
   // Ключ дедупликации: Meta может прислать одно событие несколько раз.
-  const externalId = messages.map((m) => m.providerMessageId).sort().join('|').slice(0, 500);
+  // У статуса ключ — id сообщения + сам статус: «доставлено» и «прочитано»
+  // по одному сообщению — разные события.
+  const keys = [
+    ...messages.map((m) => m.providerMessageId),
+    ...statuses.map((st) => `${st.providerMessageId}:${st.status}`),
+  ].sort().join('|');
+  const externalId = keys.length <= 200 ? keys : `sha256:${createHash('sha256').update(keys).digest('hex')}`;
 
   try {
     const event = await prisma.webhookEvent.create({

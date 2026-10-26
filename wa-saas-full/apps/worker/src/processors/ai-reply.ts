@@ -1,6 +1,5 @@
 import { prisma, forCompany } from '@wa/db';
-import { answerQuestion, isWindowOpen } from '@wa/core';
-import { getProvider } from '@wa/whatsapp';
+import { answerQuestion, isWindowOpen, sendWhatsAppText, markWhatsAppRead, sendErrorText } from '@wa/core';
 
 /**
  * Ответ ассистента на входящее сообщение. Вызывается только если диалог
@@ -84,11 +83,39 @@ export async function generateAiReply({ companyId, conversationId, inboundProvid
   const still = await db.conversation.findFirst({ where: { id: conversationId }, select: { mode: true } });
   if (still?.mode !== 'AI') return;
 
-  const sent = await getProvider().sendText({
-    phoneNumberId: conversation.phoneNumber.phoneNumberId,
-    to: conversation.customer.waId,
-    text: result.answer,
-  });
+  let sent: { providerMessageId: string };
+  try {
+    // Лимиты и временные сбои Meta — пара повторов прямо здесь: повтор всей
+    // задачи не поможет, входящее уже сохранено и второй раз не обработается.
+    sent = await sendWhatsAppText(db, {
+      phoneNumberRowId: conversation.phoneNumber.id,
+      to: conversation.customer.waId,
+      text: result.answer,
+      retries: 2,
+    });
+  } catch (error) {
+    // Ответ готов, но не ушёл — отдаём диалог человеку и показываем причину,
+    // чтобы клиент не остался без ответа молча.
+    await db.conversation.updateMany({ where: { id: conversationId, mode: 'AI' }, data: { mode: 'HUMAN' } });
+    await db.message.create({
+      data: {
+        conversationId,
+        direction: 'OUTBOUND',
+        authorType: 'SYSTEM',
+        text: `Ассистент подготовил ответ, но WhatsApp его не принял: ${sendErrorText(error)} Диалог передан менеджеру.`,
+        status: 'SENT',
+        sentAt: new Date(),
+        metadata: { draft: result.answer, error: (error as Error).message.slice(0, 300) },
+      } as never,
+    });
+    console.error(`[ai] ${conversationId}: отправка не удалась —`, (error as Error).message);
+    return;
+  }
+
+  // Клиент видит синие галочки: его сообщение прочитано и на него ответили.
+  if (last.providerMessageId) {
+    await markWhatsAppRead(db, { phoneNumberRowId: conversation.phoneNumber.id, providerMessageId: last.providerMessageId });
+  }
 
   const now = new Date();
   await db.message.create({

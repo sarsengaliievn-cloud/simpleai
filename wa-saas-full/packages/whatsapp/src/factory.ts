@@ -1,23 +1,27 @@
 import { MockWhatsAppProvider } from './mock.js';
+import { CloudApiWhatsAppProvider } from './cloud.js';
 import type { WhatsAppProvider } from './types.js';
 
 let instance: WhatsAppProvider | null = null;
 
 /**
- * Спринт 6: сюда добавляется CloudApiWhatsAppProvider и выбор по
- * WHATSAPP_PROVIDER=cloud. До тех пор честно работает только мок —
- * никакой имитации боевого подключения.
+ * WHATSAPP_PROVIDER:
+ *   cloud — боевой WhatsApp Business Platform (Cloud API) от Meta;
+ *   mock  — локальная разработка: наружу ничего не уходит.
  */
 export function getProvider(): WhatsAppProvider {
   if (instance) return instance;
 
-  const configured = process.env.WHATSAPP_PROVIDER ?? 'mock';
-  if (configured !== 'mock') {
-    throw new Error(
-      `WHATSAPP_PROVIDER=${configured} ещё не реализован. Доступен только mock (спринт 6).`,
-    );
+  const configured = (process.env.WHATSAPP_PROVIDER ?? 'mock').toLowerCase();
+  switch (configured) {
+    case 'cloud':
+      instance = new CloudApiWhatsAppProvider();
+      break;
+    case 'mock':
+      instance = new MockWhatsAppProvider();
+      break;
+    default:
+      throw new Error(`Неизвестный WHATSAPP_PROVIDER=${configured}. Доступны: cloud, mock.`);
   }
-
-  instance = new MockWhatsAppProvider();
   return instance;
 }

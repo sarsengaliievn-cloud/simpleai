@@ -99,6 +99,8 @@ export default async function ConversationsPage({ searchParams }: Props) {
                 authorType: m.authorType,
                 text: m.text,
                 type: m.type,
+                status: m.status,
+                errorCode: m.errorCode,
                 createdAt: m.createdAt,
               }))}
             />
