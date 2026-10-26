@@ -1,5 +1,8 @@
 # WhatsApp AI Platform — каркас
 
+> Развёртывание на сервере — [DEPLOY.md](DEPLOY.md). Изменения схемы базы — только
+> через `pnpm db:migrate --name <что_меняем>`, файлы миграций коммитятся.
+
 Спринт 0. Не продукт, а фундамент: монорепо, база, очередь, приём вебхука и слой изоляции арендаторов.
 
 ## Запуск
@@ -12,7 +15,7 @@ openssl rand -base64 32   # → ENCRYPTION_KEY
 docker compose up -d
 pnpm install
 pnpm db:generate
-pnpm db:migrate --name init
+pnpm db:deploy        # миграции из packages/db/prisma/migrations
 pnpm db:seed
 
 pnpm dev
@@ -118,7 +121,7 @@ pnpm --filter @wa/db test
 
 ```bash
 docker compose up -d
-pnpm install && pnpm db:generate && pnpm db:migrate --name init && pnpm db:seed
+pnpm install && pnpm db:generate && pnpm db:deploy && pnpm db:seed
 pnpm dev            # → http://localhost:3000/conversations
 ```
 
@@ -143,10 +146,10 @@ pnpm dev            # → http://localhost:3000/conversations
 
 ```bash
 docker compose up -d
-pnpm install && pnpm db:generate && pnpm db:migrate --name ai_knowledge
+pnpm install && pnpm db:generate && pnpm db:deploy
 
 # ОБЯЗАТЕЛЬНО: колонка эмбеддингов и индекс — Prisma их не умеет
-psql "$DATABASE_URL" -f packages/db/sql/vector.sql
+# vector.sql больше не нужен: колонка эмбеддингов входит в миграцию 0_init.
 
 pnpm db:seed && pnpm dev
 ```

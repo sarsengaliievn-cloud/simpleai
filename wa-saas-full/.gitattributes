@@ -1,0 +1,5 @@
+# Скрипты для Linux-сервера: всегда LF, иначе bash на сервере падает с \r.
+*.sh text eol=lf
+Dockerfile text eol=lf
+deploy/Caddyfile text eol=lf
+*.yml text eol=lf

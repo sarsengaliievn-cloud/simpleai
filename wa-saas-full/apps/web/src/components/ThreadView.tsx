@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useEffect, useRef } from 'react';
 import { sendMessage, takeOver, returnToAi, markRead } from '@/app/conversations/actions';
-import { initials, avatarColor, clock } from '@/lib/format';
+import { initials, avatarColor, clockWithDay } from '@/lib/format';
 
 type Message = {
   id: string;
@@ -105,7 +105,7 @@ export function ThreadView({
             <div key={m.id} className={`msg ${m.direction === 'INBOUND' ? 'msg-in' : 'msg-out'}`}>
               {m.text ?? <em className="small">Вложение: {m.type.toLowerCase()}</em>}
               <span className="msg-t">
-                {clock(m.createdAt)}
+                {clockWithDay(m.createdAt)}
                 {AUTHOR[m.authorType] ? ` · ${AUTHOR[m.authorType]}` : ''}
               </span>
             </div>
@@ -128,7 +128,7 @@ export function ThreadView({
             disabled={!conversation.windowOpen || pending}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 submit();
               }
@@ -144,7 +144,7 @@ export function ThreadView({
         </div>
         <div className="tiny muted" style={{ marginTop: 7 }}>
           {conversation.windowOpen
-            ? `Окно 24 часа открыто до ${conversation.windowExpiresAt ? clock(conversation.windowExpiresAt) : '—'}.`
+            ? `Окно 24 часа открыто до ${conversation.windowExpiresAt ? clockWithDay(conversation.windowExpiresAt) : '—'}.`
             : 'Прошло больше 24 часов с последнего сообщения клиента. Свободный текст Meta не примет — только утверждённый шаблон.'}
         </div>
       </div>

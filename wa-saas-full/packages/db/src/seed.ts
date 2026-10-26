@@ -1,4 +1,11 @@
+import { randomBytes, scryptSync } from 'node:crypto';
 import { prisma } from './client.js';
+
+/** Тот же формат, что и в приложении: salt:hash, scrypt. */
+function hashPassword(password: string) {
+  const salt = randomBytes(16).toString('hex');
+  return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
+}
 
 /**
  * Demo Store из ТЗ: компания, номер WhatsApp, клиенты и переписка.
@@ -18,6 +25,35 @@ async function main() {
       country: 'Казахстан',
       city: 'Алматы',
       description: 'Оригинальные кроссовки и кеды. Три магазина в Алматы, доставка по Казахстану.',
+    },
+  });
+
+  const user = await prisma.user.upsert({
+    where: { email: 'demo@demostore.kz' },
+    update: {},
+    create: {
+      email: 'demo@demostore.kz',
+      firstName: 'Демо',
+      lastName: 'Владелец',
+      passwordHash: hashPassword('demo12345'),
+      emailVerified: new Date(),
+    },
+  });
+
+  await prisma.membership.upsert({
+    where: { userId_companyId: { userId: user.id, companyId: company.id } },
+    update: {},
+    create: { userId: user.id, companyId: company.id, role: 'OWNER' },
+  });
+
+  await prisma.aIConfiguration.upsert({
+    where: { companyId: company.id },
+    update: {},
+    create: {
+      companyId: company.id,
+      role: 'Консультант магазина «Demo Store»',
+      goals: ['отвечать о наличии, размерах и цене', 'рассказывать про доставку'],
+      forbidden: 'Выдумывать наличие товара, цены и сроки. Давать скидки.',
     },
   });
 
@@ -126,7 +162,7 @@ async function main() {
   }
 
   console.log(`Готово: ${company.name} (${company.id})`);
-  console.log('Положи этот id в DEV_COMPANY_ID, если компаний станет больше одной.');
+  console.log('Вход: demo@demostore.kz / demo12345');
 }
 
 main()

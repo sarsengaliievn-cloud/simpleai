@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkNumber, completeEmbeddedSignup } from '@/app/whatsapp/actions';
 
@@ -34,8 +34,11 @@ export function ConnectWhatsAppModal({
   const [busy, setBusy] = useState(false);
 
   // Данные из окна Meta приходят отдельным сообщением, а код — в колбэке
-  // FB.login. Оба нужны одновременно, поэтому храним промежуточно.
-  const [session, setSession] = useState<{ wabaId: string; phoneNumberId: string } | null>(null);
+  // FB.login. Хранить их нужно в ref, а не в state: колбэк FB.login
+  // создаётся в момент клика и видит state того рендера, то есть null.
+  // Из-за этого подключение всегда заканчивалось ошибкой «Meta не передала
+  // данные аккаунта», даже когда всё прошло успешно.
+  const sessionRef = useRef<{ wabaId: string; phoneNumberId: string } | null>(null);
 
   useEffect(() => {
     if (window.FB) { setSdkReady(true); return; }
@@ -54,9 +57,13 @@ export function ConnectWhatsAppModal({
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (!event.origin.endsWith('facebook.com')) return;
+      // endsWith('facebook.com') пропускал бы и evilfacebook.com.
+      let host = '';
+      try { host = new URL(event.origin).hostname; } catch { return; }
+      if (host !== 'facebook.com' && !host.endsWith('.facebook.com')) return;
       try {
-        const data = JSON.parse(event.data as string) as {
+        if (typeof event.data !== 'string') return;
+        const data = JSON.parse(event.data) as {
           type?: string;
           event?: string;
           data?: { waba_id?: string; phone_number_id?: string };
@@ -65,7 +72,7 @@ export function ConnectWhatsAppModal({
         if (data.type !== 'WA_EMBEDDED_SIGNUP') return;
 
         if (data.event === 'FINISH' && data.data?.waba_id && data.data.phone_number_id) {
-          setSession({ wabaId: data.data.waba_id, phoneNumberId: data.data.phone_number_id });
+          sessionRef.current = { wabaId: data.data.waba_id, phoneNumberId: data.data.phone_number_id };
         } else if (data.event === 'CANCEL') {
           setError('Подключение отменено в окне Meta');
           setStep('ready');
@@ -108,13 +115,27 @@ export function ConnectWhatsAppModal({
 
     setError(null);
     setStep('connecting');
+    sessionRef.current = null;
 
     window.FB.login(
       (response) => {
         const code = response.authResponse?.code;
         if (!code) { setError('Meta не вернула код авторизации'); setStep('ready'); return; }
-        if (!session) { setError('Meta не передала данные аккаунта. Попробуйте ещё раз.'); setStep('ready'); return; }
-        void finish(code, session.wabaId, session.phoneNumberId);
+
+        // Сообщение с WABA ID обычно приходит раньше колбэка, но порядок
+        // не гарантирован — даём ему до 5 секунд.
+        const startedAt = Date.now();
+        const waitForSession = () => {
+          const session = sessionRef.current;
+          if (session) { void finish(code, session.wabaId, session.phoneNumberId); return; }
+          if (Date.now() - startedAt > 5000) {
+            setError('Meta не передала данные аккаунта. Попробуйте ещё раз.');
+            setStep('ready');
+            return;
+          }
+          setTimeout(waitForSession, 250);
+        };
+        waitForSession();
       },
       {
         config_id: configId,

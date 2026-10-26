@@ -5,3 +5,12 @@ dist
 .env.local
 *.log
 .DS_Store
+
+# Резервная копия до аудита 2026-10-09
+_backup-*/
+
+# Сервер: секреты и резервные копии
+.env.production
+backups/
+*.tsbuildinfo
+dump.rdb

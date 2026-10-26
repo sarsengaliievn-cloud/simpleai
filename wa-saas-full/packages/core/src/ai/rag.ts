@@ -50,10 +50,10 @@ export async function answerQuestion(params: {
 
   const result = await ai.generate({
     system: buildSystemPrompt(params.config, params.company),
-    messages: [
+    messages: normalizeHistory([
       ...(params.history ?? []),
       { role: 'user', content: `Фрагменты базы знаний:\n\n${context}\n\n---\n\nВопрос клиента: ${params.question}` },
-    ],
+    ]),
   });
 
   const parsed = parseAnswer(result.text);
@@ -73,8 +73,32 @@ export async function answerQuestion(params: {
   };
 }
 
+/**
+ * Провайдеры капризны к форме истории: Anthropic требует, чтобы диалог
+ * начинался с user и роли чередовались. В переписке так бывает не всегда
+ * (ассистент написал первым, клиент прислал три сообщения подряд), поэтому
+ * ведущие ответы ассистента отбрасываем, а подряд идущие реплики одной
+ * стороны склеиваем.
+ */
+export function normalizeHistory(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    const content = m.content.trim().slice(0, 4000);
+    if (!content) continue;
+    if (out.length === 0 && m.role !== 'user') continue;
+    const prev = out.at(-1);
+    if (prev && prev.role === m.role) prev.content += `\n${content}`;
+    else out.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content });
+  }
+  return out;
+}
+
 function parseAnswer(raw: string): { answer: string; confidence: number; needsHuman: boolean } {
-  const cleaned = raw.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  let cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  // Модель иногда добавляет фразу до или после JSON — берём сам объект.
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start !== -1 && end > start) cleaned = cleaned.slice(start, end + 1);
 
   try {
     const data = JSON.parse(cleaned) as { answer?: string; confidence?: number; needs_human?: boolean };

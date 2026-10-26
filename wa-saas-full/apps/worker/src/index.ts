@@ -1,8 +1,5 @@
-import { config } from 'dotenv';
-
-// tsx не загружает .env сам, а ключи AI и адрес базы нужны воркеру
-// ровно так же, как и веб-приложению.
-config({ path: '../../.env' });
+// Первая строка — загрузка .env. Порядок импортов здесь важен, см. env.ts.
+import './env.js';
 
 import { Worker } from 'bullmq';
 import { QUEUES, type InboundMessageJob, type IngestDocumentJob } from '@wa/core';
@@ -27,9 +24,12 @@ ingestWorker.on('failed', (job, err) => console.error(`[ingest] fail ${job?.id}:
 worker.on('completed', (job) => console.log(`[worker] ok ${job.id}`));
 worker.on('failed', (job, err) => console.error(`[worker] fail ${job?.id}:`, err.message));
 
-console.log('[worker] запущен, слушаю очередь', QUEUES.inboundMessage);
+console.log('[worker] запущен, слушаю очереди', QUEUES.inboundMessage, QUEUES.ingestDocument);
 
+let stopping = false;
 async function shutdown() {
+  if (stopping) return;
+  stopping = true;
   console.log('[worker] останавливаюсь');
   await worker.close();
   await ingestWorker.close();

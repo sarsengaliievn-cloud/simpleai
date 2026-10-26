@@ -1,20 +1,32 @@
-import { prisma, forCompany } from '@wa/db';
+import { redirect } from 'next/navigation';
+import { prisma, forCompany, type Role } from '@wa/db';
+import { getSessionUser } from './auth';
 
 /**
- * ВРЕМЕННО. Авторизации ещё нет (спринт 1), поэтому компания берётся из
- * DEV_COMPANY_ID или просто первая в базе. Как только появится сессия,
- * меняется только тело этой функции — весь остальной код уже написан так,
- * будто арендатор приходит из сессии.
+ * Компания текущего пользователя. Всё, что работает с данными арендатора,
+ * начинается отсюда: db уже привязан к нужной компании.
  */
 export async function requireCompany() {
-  const id = process.env.DEV_COMPANY_ID;
-  const company = id
-    ? await prisma.company.findUnique({ where: { id } })
-    : await prisma.company.findFirst({ orderBy: { createdAt: 'asc' } });
+  const user = await getSessionUser();
+  if (!user) redirect('/login');
 
-  if (!company) {
-    throw new Error('Нет ни одной компании. Запусти pnpm db:seed.');
-  }
+  const membership = await prisma.membership.findFirst({
+    where: { userId: user.id },
+    include: { company: true },
+    orderBy: { createdAt: 'asc' },
+  });
 
-  return { company, db: forCompany(prisma, company.id) };
+  if (!membership) redirect('/login');
+
+  return {
+    user,
+    company: membership.company,
+    role: membership.role as Role,
+    db: forCompany(prisma, membership.companyId),
+  };
+}
+
+/** Мягкая версия для страниц, доступных и без входа. */
+export async function getCurrentUser() {
+  return getSessionUser();
 }

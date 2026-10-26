@@ -33,3 +33,17 @@ export function clock(date: Date) {
     timeZone: 'Asia/Almaty',
   }).format(date);
 }
+
+/** Время, а для не сегодняшней даты — ещё и день: «завтра в 14:20» без даты путает. */
+export function clockWithDay(date: Date) {
+  const tz = 'Asia/Almaty';
+  const day = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d);
+  if (day(date) === day(new Date())) return clock(date);
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: tz,
+  }).format(date);
+}

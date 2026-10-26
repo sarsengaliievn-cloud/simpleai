@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 const DAYS = 14;
 
 export default async function AnalyticsPage() {
-  const { company, db } = await requireCompany();
+  const { company, db, user } = await requireCompany();
 
   const since = new Date(Date.now() - DAYS * 24 * 60 * 60 * 1000);
 
@@ -25,13 +25,20 @@ export default async function AnalyticsPage() {
     db.conversation.count({ where: { mode: 'HUMAN' } }),
   ]);
 
+  // День считаем по часовому поясу компании: по UTC сообщения с полуночи
+  // до пяти утра по Алматы попадали во вчерашний столбик.
+  const dayKey = new Intl.DateTimeFormat('en-CA', {
+    timeZone: company.timezone || 'Asia/Almaty',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
   const byDay = new Map<string, number>();
   for (let i = DAYS - 1; i >= 0; i -= 1) {
-    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
-    byDay.set(d.toISOString().slice(0, 10), 0);
+    byDay.set(dayKey.format(new Date(Date.now() - i * 24 * 60 * 60 * 1000)), 0);
   }
   for (const m of messages) {
-    const key = m.createdAt.toISOString().slice(0, 10);
+    // Системные пометки («диалог передан менеджеру») — не сообщения.
+    if (m.authorType === 'SYSTEM') continue;
+    const key = dayKey.format(m.createdAt);
     if (byDay.has(key)) byDay.set(key, byDay.get(key)! + 1);
   }
 
@@ -47,6 +54,9 @@ export default async function AnalyticsPage() {
   const gaps: number[] = [];
   const byConversation = new Map<string, typeof messages>();
   for (const m of messages) {
+    // Системная пометка — не ответ клиенту: с ней «время ответа» выходило
+    // мгновенным именно там, где ассистент промолчал.
+    if (m.authorType === 'SYSTEM') continue;
     const list = byConversation.get(m.conversationId) ?? [];
     list.push(m);
     byConversation.set(m.conversationId, list);
@@ -62,7 +72,7 @@ export default async function AnalyticsPage() {
   const avgLabel = avgGap === null ? '—' : avgGap < 90 ? `${avgGap} сек` : `${Math.round(avgGap / 60)} мин`;
 
   const kpis: Array<[string, string, string]> = [
-    ['Сообщений за 14 дней', String(messages.length), 'входящие и исходящие'],
+    ['Сообщений за 14 дней', String(messages.filter((m) => m.authorType !== 'SYSTEM').length), 'входящие и исходящие'],
     ['Диалогов', String(conversations), 'всего в базе'],
     ['Клиентов', String(customers), 'создано автоматически'],
     ['Ответов ассистента', String(aiHandled), 'за всё время'],
@@ -72,7 +82,7 @@ export default async function AnalyticsPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
       <div className="main">
         <header className="top">
           <h1>Аналитика</h1>

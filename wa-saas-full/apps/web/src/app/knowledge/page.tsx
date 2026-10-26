@@ -2,6 +2,7 @@ import { requireCompany } from '@/lib/session';
 import { Sidebar } from '@/components/Sidebar';
 import { KnowledgeUpload } from '@/components/KnowledgeUpload';
 import { KnowledgeSearch } from '@/components/KnowledgeSearch';
+import { AutoRefresh } from '@/components/AutoRefresh';
 import { removeDocument } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -14,15 +15,17 @@ const STATUS: Record<string, [string, string]> = {
 };
 
 export default async function KnowledgePage() {
-  const { company, db } = await requireCompany();
+  const { company, db, user } = await requireCompany();
 
   const docs = await db.knowledgeDocument.findMany({ orderBy: { createdAt: 'desc' }, take: 100 });
   const chunks = docs.reduce((sum, d) => sum + d.chunkCount, 0);
+  const indexing = docs.some((d) => d.status === 'PENDING' || d.status === 'PROCESSING');
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
       <div className="main">
+        <AutoRefresh active={indexing} />
         <header className="top">
           <h1>База знаний</h1>
           <span className="chip" style={{ marginLeft: 'auto' }}>

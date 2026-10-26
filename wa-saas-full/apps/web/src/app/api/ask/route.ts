@@ -3,16 +3,36 @@ import { answerQuestion } from '@wa/core';
 
 export const dynamic = 'force-dynamic';
 
+type Body = { question?: unknown; history?: unknown };
+
 /**
  * Один вопрос к ассистенту без отправки в WhatsApp.
  * Используется и тестовым чатом, и отладкой поиска по базе знаний.
  */
 export async function POST(request: Request) {
   const { company, db } = await requireCompany();
-  const body = (await request.json()) as { question?: string; history?: Array<{ role: 'user' | 'assistant'; content: string }> };
 
-  const question = (body.question ?? '').trim();
+  let body: Body;
+  try {
+    body = (await request.json()) as Body;
+  } catch {
+    return Response.json({ error: 'Некорректный запрос' }, { status: 400 });
+  }
+
+  const question = typeof body.question === 'string' ? body.question.trim() : '';
   if (!question) return Response.json({ error: 'Пустой вопрос' }, { status: 400 });
+  if (question.length > 2000) return Response.json({ error: 'Слишком длинный вопрос' }, { status: 400 });
+
+  // История приходит из браузера — доверять её форме нельзя.
+  const history = Array.isArray(body.history)
+    ? body.history
+        .filter((m): m is { role: 'user' | 'assistant'; content: string } =>
+          !!m && typeof m === 'object' &&
+          ((m as { role?: unknown }).role === 'user' || (m as { role?: unknown }).role === 'assistant') &&
+          typeof (m as { content?: unknown }).content === 'string')
+        .slice(-8)
+        .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }))
+    : [];
 
   const config = await db.aIConfiguration.findFirst();
   if (!config) {
@@ -25,7 +45,7 @@ export async function POST(request: Request) {
       company,
       config,
       question,
-      history: body.history?.slice(-8),
+      history,
     });
 
     return Response.json({

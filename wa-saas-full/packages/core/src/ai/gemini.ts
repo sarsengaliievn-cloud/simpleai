@@ -1,6 +1,7 @@
 import type { AIProvider, GenerateOptions, GenerateResult } from './provider.js';
 
-const BASE = 'https://generativelanguage.googleapis.com/v1beta';
+/** Переопределяется через GEMINI_BASE_URL — для прокси или тестового стенда. */
+const BASE = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, '');
 
 /** Размерность должна совпадать с колонкой vector(1536) в knowledge_chunks. */
 const EMBED_DIM = 1536;
@@ -32,7 +33,10 @@ export class GeminiProvider implements AIProvider {
         })),
         generationConfig: {
           temperature: options.temperature ?? 0.3,
-          maxOutputTokens: options.maxTokens ?? 1024,
+          // У «думающих» моделей Gemini (2.5+, 3.x) рассуждения расходуют
+          // тот же лимит, что и ответ. При 1024 JSON обрезался на середине,
+          // разбор падал, и ассистент звал менеджера на простой вопрос.
+          maxOutputTokens: Math.max(options.maxTokens ?? 0, 8192),
           // Просим ответ сразу в JSON — наш разбор ждёт именно его.
           responseMimeType: 'application/json',
         },
@@ -44,14 +48,29 @@ export class GeminiProvider implements AIProvider {
     }
 
     const data = (await response.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string; thought?: boolean }> };
+        finishReason?: string;
+      }>;
+      promptFeedback?: { blockReason?: string };
       usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
     };
 
-    const text = (data.candidates?.[0]?.content?.parts ?? [])
+    const candidate = data.candidates?.[0];
+    const text = (candidate?.content?.parts ?? [])
+      .filter((p) => !p.thought)
       .map((p) => p.text ?? '')
       .join('')
       .trim();
+
+    // Пустой или обрезанный ответ — повод для менеджера, но причину пишем
+    // в лог, иначе «ассистент всё время зовёт человека» не разобрать.
+    if (!text || (candidate?.finishReason && candidate.finishReason !== 'STOP')) {
+      console.warn(
+        `[gemini] ответ ${text ? 'неполный' : 'пустой'}: finishReason=${candidate?.finishReason ?? '—'}` +
+          (data.promptFeedback?.blockReason ? `, blockReason=${data.promptFeedback.blockReason}` : ''),
+      );
+    }
 
     return {
       text,

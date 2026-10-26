@@ -6,7 +6,7 @@ import { initials, avatarColor, timeAgo } from '@/lib/format';
 export const dynamic = 'force-dynamic';
 
 export default async function CustomersPage() {
-  const { company, db } = await requireCompany();
+  const { company, db, user } = await requireCompany();
 
   const customers = await db.customer.findMany({
     orderBy: { lastContactAt: 'desc' },
@@ -19,7 +19,7 @@ export default async function CustomersPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
       <div className="main">
         <header className="top">
           <h1>Клиенты</h1>

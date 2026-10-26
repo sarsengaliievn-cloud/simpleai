@@ -5,6 +5,8 @@ import { useState } from 'react';
 type Turn = {
   role: 'user' | 'assistant';
   content: string;
+  /** Служебная реплика (ошибка, «передал бы менеджеру») — в историю модели не идёт. */
+  service?: boolean;
   confidence?: number;
   needsHuman?: boolean;
   sources?: string[];
@@ -19,7 +21,9 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
     const question = text.trim();
     if (!question || loading) return;
 
-    const history = turns.map((t) => ({ role: t.role, content: t.content }));
+    // Модели отдаём только настоящий диалог: служебные строки вроде
+    // «Сеть недоступна» она приняла бы за свои прошлые ответы.
+    const history = turns.filter((t) => !t.service).map((t) => ({ role: t.role, content: t.content }));
     setTurns((prev) => [...prev, { role: 'user', content: question }]);
     setText('');
     setLoading(true);
@@ -30,7 +34,7 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ question, history }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
 
       setTurns((prev) => [
         ...prev,
@@ -38,14 +42,15 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
           ? {
               role: 'assistant',
               content: json.answer || 'В базе знаний нет ответа на этот вопрос — передал бы менеджеру.',
+              service: !json.answer || json.needsHuman,
               confidence: json.confidence,
               needsHuman: json.needsHuman,
-              sources: json.hits?.slice(0, 2).map((h: { title: string }) => h.title),
+              sources: [...new Set<string>(json.hits?.slice(0, 3).map((h: { title: string }) => h.title) ?? [])].slice(0, 2),
             }
-          : { role: 'assistant', content: json.error ?? 'Ошибка' },
+          : { role: 'assistant', content: json.error ?? `Ошибка ${res.status}`, service: true },
       ]);
     } catch {
-      setTurns((prev) => [...prev, { role: 'assistant', content: 'Сеть недоступна' }]);
+      setTurns((prev) => [...prev, { role: 'assistant', content: 'Сеть недоступна', service: true }]);
     } finally {
       setLoading(false);
     }
@@ -101,7 +106,7 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
           <div className="row">
             <input className="input" placeholder="Написать как клиент…" value={text}
                    onChange={(e) => setText(e.target.value)}
-                   onKeyDown={(e) => e.key === 'Enter' && send()} />
+                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(); }} />
             <button className="btn btn-primary" onClick={send} disabled={loading || !text.trim()}>Отправить</button>
           </div>
         </div>

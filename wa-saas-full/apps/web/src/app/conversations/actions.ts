@@ -5,20 +5,29 @@ import { requireCompany } from '@/lib/session';
 import { getProvider } from '@wa/whatsapp';
 import { assertCanSendFreeText } from '@wa/core';
 
-/** Менеджер забирает диалог: ассистент перестаёт отвечать автоматически. */
-export async function takeOver(conversationId: string) {
-  const { db } = await requireCompany();
+/**
+ * Переключение режима диалога. Системное сообщение пишется только если
+ * диалог действительно принадлежит компании: tenant-фильтр подставляет
+ * companyId в create, но не проверяет, чей conversationId передали, —
+ * без этой проверки можно было вписать строку в диалог другой компании.
+ */
+async function switchMode(conversationId: string, mode: 'AI' | 'HUMAN', note: string) {
+  const { db, user } = await requireCompany();
 
-  await db.conversation.updateMany({
-    where: { id: conversationId },
-    data: { mode: 'HUMAN' },
+  const { count } = await db.conversation.updateMany({
+    where: { id: conversationId, mode: mode === 'AI' ? 'HUMAN' : 'AI' },
+    data: { mode },
   });
+  // 0 — чужой диалог, несуществующий id или режим уже такой (двойной клик).
+  if (count === 0) return;
+
   await db.message.create({
     data: {
       conversationId,
       direction: 'OUTBOUND',
       authorType: 'SYSTEM',
-      text: 'Менеджер забрал диалог — ассистент больше не отвечает автоматически',
+      authorUserId: user.id,
+      text: note,
       status: 'SENT',
       sentAt: new Date(),
     } as never,
@@ -27,25 +36,13 @@ export async function takeOver(conversationId: string) {
   revalidatePath('/conversations');
 }
 
+/** Менеджер забирает диалог: ассистент перестаёт отвечать автоматически. */
+export async function takeOver(conversationId: string) {
+  await switchMode(conversationId, 'HUMAN', 'Менеджер забрал диалог — ассистент больше не отвечает автоматически');
+}
+
 export async function returnToAi(conversationId: string) {
-  const { db } = await requireCompany();
-
-  await db.conversation.updateMany({
-    where: { id: conversationId },
-    data: { mode: 'AI' },
-  });
-  await db.message.create({
-    data: {
-      conversationId,
-      direction: 'OUTBOUND',
-      authorType: 'SYSTEM',
-      text: 'Диалог возвращён ассистенту',
-      status: 'SENT',
-      sentAt: new Date(),
-    } as never,
-  });
-
-  revalidatePath('/conversations');
+  await switchMode(conversationId, 'AI', 'Диалог возвращён ассистенту');
 }
 
 /**
@@ -55,8 +52,9 @@ export async function returnToAi(conversationId: string) {
 export async function sendMessage(conversationId: string, text: string) {
   const body = text.trim();
   if (!body) return { ok: false as const, error: 'Пустое сообщение' };
+  if (body.length > 4096) return { ok: false as const, error: 'WhatsApp принимает до 4096 символов' };
 
-  const { db } = await requireCompany();
+  const { db, user } = await requireCompany();
 
   const conversation = await db.conversation.findFirst({
     where: { id: conversationId },
@@ -70,8 +68,8 @@ export async function sendMessage(conversationId: string, text: string) {
     return { ok: false as const, error: (error as Error).message };
   }
 
-  if (!conversation.phoneNumber) {
-    return { ok: false as const, error: 'К диалогу не привязан номер WhatsApp' };
+  if (!conversation.phoneNumber || conversation.phoneNumber.status === 'DISCONNECTED') {
+    return { ok: false as const, error: 'К диалогу не привязан активный номер WhatsApp' };
   }
 
   let providerMessageId: string;
@@ -93,6 +91,7 @@ export async function sendMessage(conversationId: string, text: string) {
       conversationId,
       direction: 'OUTBOUND',
       authorType: 'MANAGER',
+      authorUserId: user.id,
       type: 'TEXT',
       text: body,
       providerMessageId,
@@ -112,6 +111,10 @@ export async function sendMessage(conversationId: string, text: string) {
 /** Отметить прочитанным при открытии диалога. */
 export async function markRead(conversationId: string) {
   const { db } = await requireCompany();
-  await db.conversation.updateMany({ where: { id: conversationId }, data: { unreadCount: 0 } });
-  revalidatePath('/conversations');
+  const { count } = await db.conversation.updateMany({
+    where: { id: conversationId, unreadCount: { gt: 0 } },
+    data: { unreadCount: 0 },
+  });
+  // Без лишней перерисовки, если читать было нечего.
+  if (count > 0) revalidatePath('/conversations');
 }

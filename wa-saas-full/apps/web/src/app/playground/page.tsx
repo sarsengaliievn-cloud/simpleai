@@ -5,13 +5,13 @@ import { Playground } from '@/components/Playground';
 export const dynamic = 'force-dynamic';
 
 export default async function PlaygroundPage() {
-  const { company, db } = await requireCompany();
+  const { company, db, user } = await requireCompany();
   const config = await db.aIConfiguration.findFirst();
   const docs = await db.knowledgeDocument.count({ where: { status: 'READY' } });
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
       <div className="main">
         <header className="top">
           <h1>Тестовый чат</h1>

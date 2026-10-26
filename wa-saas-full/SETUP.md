@@ -9,7 +9,10 @@
 4. `pnpm install`
 5. `pnpm dev`
 
-Миграции и `vector.sql` заново запускать не нужно — база не менялась.
+Если база создавалась до октября 2026 (через `vector.sql`) — один раз выполни
+`pnpm db:baseline` (Docker Desktop должен быть запущен). Данные не трогаются:
+убираются два лишних индекса, и база переходит на миграции из
+`packages/db/prisma/migrations`. После этого `pnpm db:migrate` работает как обычно.
 
 ## С нуля
 
@@ -20,9 +23,7 @@ notepad .env                # вписать GEMINI_API_KEY
 docker compose up -d
 pnpm install
 pnpm db:generate
-pnpm db:migrate --name init
-docker compose cp packages\db\sql\vector.sql postgres:/tmp/vector.sql
-docker compose exec postgres psql -U wa -d wa_saas -f /tmp/vector.sql
+pnpm db:deploy              # применить миграции (vector.sql больше не нужен)
 pnpm db:seed
 pnpm dev
 ```

@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { logout } from '@/app/login/actions';
 
 /** [href, подпись, готово ли]. Незаконченное показываем, но не кликаем — */
 /** так видно план, и при этом никто не упирается в 404.                  */
@@ -23,7 +24,7 @@ const NAV: Array<[string, Array<[string, string, boolean]>]> = [
   ]],
 ];
 
-export function Sidebar({ companyName }: { companyName: string }) {
+export function Sidebar({ companyName, userName }: { companyName: string; userName?: string }) {
   const path = usePathname();
 
   return (
@@ -59,7 +60,14 @@ export function Sidebar({ companyName }: { companyName: string }) {
       </nav>
 
       <div style={{ padding: 12, borderTop: '1px solid var(--line)' }}>
-        <div className="tiny muted">Авторизации пока нет — спринт 1</div>
+        <div className="spread">
+          <div className="small" style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {userName ?? ''}
+          </div>
+          <form action={logout}>
+            <button className="btn btn-quiet btn-sm" type="submit">Выйти</button>
+          </form>
+        </div>
       </div>
     </aside>
   );

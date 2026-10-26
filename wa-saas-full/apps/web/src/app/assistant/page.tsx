@@ -8,8 +8,11 @@ export const dynamic = 'force-dynamic';
 const TONES = ['Дружелюбный', 'Профессиональный', 'Короткий', 'Подробный', 'Формальный'];
 const LANGS: Array<[string, string]> = [['ru', 'Русский'], ['kk', 'Қазақша'], ['en', 'English']];
 
-export default async function AssistantPage() {
-  const { company, db } = await requireCompany();
+type Props = { searchParams: Promise<{ saved?: string }> };
+
+export default async function AssistantPage({ searchParams }: Props) {
+  const { saved } = await searchParams;
+  const { company, db, user } = await requireCompany();
 
   const config = (await db.aIConfiguration.findFirst()) ?? {
     enabled: false, model: 'claude-sonnet-4-6', role: `Консультант компании «${company.name}»`,
@@ -22,7 +25,7 @@ export default async function AssistantPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
       <div className="main">
         <header className="top">
           <h1>Ассистент</h1>
@@ -32,6 +35,11 @@ export default async function AssistantPage() {
         </header>
 
         <div className="page page-narrow">
+          {saved && (
+            <div className="chip chip-ok" style={{ height: 'auto', padding: '9px 12px', marginBottom: 16, display: 'block' }}>
+              Настройки сохранены — ассистент уже работает по ним.
+            </div>
+          )}
           <form action={saveAssistant}>
             <div className="card card-p" style={{ marginBottom: 16 }}>
               <label className="row" style={{ justifyContent: 'space-between' }}>
@@ -78,6 +86,12 @@ export default async function AssistantPage() {
               <label className="field">
                 <span className="label">Запрещено</span>
                 <textarea className="textarea" name="forbidden" defaultValue={config.forbidden} />
+              </label>
+
+              <label className="field">
+                <span className="label">Дополнительные правила</span>
+                <textarea className="textarea" name="extraRules" defaultValue={config.extraRules}
+                          placeholder="Например: предлагай оформить заказ, если клиент спросил про размер и цену" />
               </label>
 
               <label className="field" style={{ marginBottom: 0 }}>

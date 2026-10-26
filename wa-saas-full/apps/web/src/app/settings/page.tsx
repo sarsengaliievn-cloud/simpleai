@@ -13,13 +13,13 @@ const ACTIONS: Record<string, string> = {
 };
 
 export default async function SettingsPage() {
-  const { company, db } = await requireCompany();
+  const { company, db, user } = await requireCompany();
 
   const logs = await db.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 30 });
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
       <div className="main">
         <header className="top"><h1>Настройки</h1></header>
 

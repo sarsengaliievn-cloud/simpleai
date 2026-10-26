@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { initials, avatarColor, timeAgo } from '@/lib/format';
 
@@ -22,16 +22,33 @@ const FILTERS: Array<[string, string]> = [
   ['closed', 'Закрытые'],
 ];
 
+function href(params: { filter: string; q: string; id?: string }) {
+  const sp = new URLSearchParams({ filter: params.filter });
+  if (params.q) sp.set('q', params.q);
+  if (params.id) sp.set('id', params.id);
+  return `/conversations?${sp}`;
+}
+
 export function ConversationList({
   items,
   activeId,
   filter,
+  query,
 }: {
   items: Item[];
   activeId: string | null;
   filter: string;
+  query: string;
 }) {
   const router = useRouter();
+  const [q, setQ] = useState(query);
+
+  // Поиск с задержкой: не дёргаем сервер на каждую букву.
+  useEffect(() => {
+    if (q.trim() === query) return;
+    const t = setTimeout(() => router.replace(href({ filter, q: q.trim() })), 350);
+    return () => clearTimeout(t);
+  }, [q, query, filter, router]);
 
   // Пока нет вебсокетов — тихое обновление раз в 8 секунд.
   // Спринт 3 заменит это на SSE.
@@ -43,12 +60,19 @@ export function ConversationList({
   return (
     <div className="inbox-list">
       <div className="inbox-filters">
-        <input className="input" placeholder="Поиск по имени или номеру" style={{ height: 38 }} />
+        <input
+          className="input"
+          type="search"
+          placeholder="Поиск по имени или номеру"
+          style={{ height: 38 }}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
         <div className="filter-row">
           {FILTERS.map(([key, label]) => (
             <Link
               key={key}
-              href={`/conversations?filter=${key}`}
+              href={href({ filter: key, q: query })}
               className={`chip ${filter === key ? 'chip-ok' : ''}`}
             >
               {label}
@@ -61,14 +85,14 @@ export function ConversationList({
         {items.length === 0 && (
           <div className="empty">
             <h3>Здесь пусто</h3>
-            <p>Под этот фильтр диалогов нет.</p>
+            <p>{query ? `По запросу «${query}» никого не нашлось.` : 'Под этот фильтр диалогов нет.'}</p>
           </div>
         )}
 
         {items.map((c) => (
           <Link
             key={c.id}
-            href={`/conversations?filter=${filter}&id=${c.id}`}
+            href={href({ filter, q: query, id: c.id })}
             className={`conv ${c.id === activeId ? 'on' : ''}`}
           >
             <div className="avatar" style={{ background: avatarColor(c.id) }}>

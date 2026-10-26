@@ -5,6 +5,7 @@ import type {
   SendResult,
   InboundMessage,
 } from './types.js';
+import { verifyMetaSignature } from './signature.js';
 
 /**
  * Мок для разработки: наружу ничего не отправляет, пишет в консоль.
@@ -27,8 +28,15 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
     return { providerMessageId: `mock_tpl_${Date.now()}` };
   }
 
-  verifySignature(): boolean {
-    return true;
+  /**
+   * Пока META_APP_SECRET не задан (локальная разработка, curl из README) —
+   * пропускаем. Как только секрет есть, подпись проверяется по-настоящему,
+   * даже с мок-провайдером: на сервере вебхук открыт всему интернету.
+   */
+  verifySignature(rawBody: string, signatureHeader: string | null): boolean {
+    const secret = process.env.META_APP_SECRET;
+    if (!secret) return true;
+    return verifyMetaSignature(rawBody, signatureHeader, secret);
   }
 
   parseWebhook(payload: unknown): InboundMessage[] {
@@ -49,16 +57,28 @@ export function parseMetaWebhook(payload: unknown): InboundMessage[] {
       const profileName = value?.contacts?.[0]?.profile?.name;
 
       for (const message of value?.messages ?? []) {
+        if (!message?.id || !message?.from) continue;
         const type = message.type as string;
+
+        // Нажатие кнопки шаблона и выбор из списка — для ассистента это
+        // обычный текстовый ответ клиента.
+        const replyText: string | undefined =
+          message.button?.text ??
+          message.interactive?.button_reply?.title ??
+          message.interactive?.list_reply?.title;
+
         result.push({
           providerMessageId: message.id,
           phoneNumberId,
           from: message.from,
           profileName,
-          type: ['text', 'image', 'audio', 'video', 'document', 'location'].includes(type)
-            ? (type as InboundMessage['type'])
-            : 'unsupported',
-          text: message.text?.body ?? message.caption,
+          type: replyText
+            ? 'text'
+            : ['text', 'image', 'audio', 'video', 'document', 'location'].includes(type)
+              ? (type as InboundMessage['type'])
+              : 'unsupported',
+          // Подпись к фото/документу Meta кладёт внутрь image/document, а не в корень.
+          text: message.text?.body ?? replyText ?? message[type]?.caption,
           mediaId: message[type]?.id,
           mediaMimeType: message[type]?.mime_type,
           timestamp: new Date(Number(message.timestamp) * 1000),

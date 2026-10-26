@@ -20,12 +20,17 @@ export function ConnectNumberForm() {
       {error && <div className="chip chip-bad" style={{ height: 'auto', padding: '7px 11px', marginBottom: 12 }}>{error}</div>}
       {done && <div className="chip chip-ok" style={{ height: 'auto', padding: '7px 11px', marginBottom: 12 }}>Номер сохранён</div>}
 
+      {/* onSubmit, а не action: React 19 очищает форму после action, и при
+          ошибке в одном поле пропадали все остальные, включая токен. */}
       <form
-        action={(formData) => {
+        onSubmit={(e) => {
+          e.preventDefault();
+          const form = e.currentTarget;
+          const formData = new FormData(form);
           setError(null); setDone(false);
           start(async () => {
             const result = await connectNumber(formData);
-            if (result.ok) setDone(true);
+            if (result.ok) { setDone(true); form.reset(); }
             else setError(result.error);
           });
         }}

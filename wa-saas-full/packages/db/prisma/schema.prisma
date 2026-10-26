@@ -1,3 +1,6 @@
+// Схема ядра. Любое изменение — через `pnpm db:migrate --name <что_меняем>`,
+// миграции коммитятся вместе со схемой. На сервере их применяет prisma migrate deploy.
+//
 // Схема ядра: спринты 0–3.
 // Knowledge Base, Products, Leads, Automations, Billing добавляются позже —
 // но companyId и правила изоляции у них будут ровно такие же.
@@ -431,6 +434,10 @@ enum IngestStatus {
 /// читать. Запись и поиск идут сырым SQL в packages/db/src/vector.ts —
 /// там же вручную проставляется company_id, потому что tenant-расширение
 /// на $queryRaw не действует.
+///
+/// Колонка описана здесь как Unsupported, чтобы она жила в миграциях,
+/// а не добавлялась руками мимо Prisma (иначе migrate dev видит расхождение
+/// и предлагает сбросить базу).
 model KnowledgeChunk {
   id         String   @id @default(uuid()) @db.Uuid
   companyId  String   @db.Uuid
@@ -438,6 +445,7 @@ model KnowledgeChunk {
   ordinal    Int
   content    String
   tokens     Int      @default(0)
+  embedding  Unsupported("vector(1536)")?
   createdAt  DateTime @default(now())
 
   company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)

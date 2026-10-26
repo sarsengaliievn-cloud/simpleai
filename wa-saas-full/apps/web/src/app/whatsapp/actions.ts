@@ -17,19 +17,26 @@ const GRAPH = 'https://graph.facebook.com/v24.0';
  * номер уже в нашей системе. Всё остальное выяснится в окне Meta.
  */
 export async function checkNumber(raw: string) {
+  // Проверка нужна только своим: без входа она превращалась в способ
+  // узнать, какие номера подключены к платформе.
+  const { company } = await requireCompany();
   const digits = raw.replace(/\D/g, '');
 
   if (digits.length < 10 || digits.length > 15) {
     return { ok: false as const, error: 'Проверьте номер: нужен формат +7 XXX XXX XXXX' };
   }
 
-  const taken = await prisma.whatsAppPhoneNumber.findFirst({
-    where: { displayPhoneNumber: { contains: digits.slice(-9) }, status: { not: 'DISCONNECTED' } },
-    select: { companyId: true },
+  // В базе номер хранится для показа — «+7 707 512 44 90», с пробелами.
+  // Поиск подстрокой по цифрам его не находил, поэтому сравниваем
+  // нормализованные цифры.
+  const active = await prisma.whatsAppPhoneNumber.findMany({
+    where: { status: { not: 'DISCONNECTED' } },
+    select: { companyId: true, displayPhoneNumber: true },
   });
+  const tail = digits.slice(-10);
+  const taken = active.find((n) => n.displayPhoneNumber.replace(/\D/g, '').endsWith(tail));
 
   if (taken) {
-    const { company } = await requireCompany();
     return taken.companyId === company.id
       ? { ok: false as const, error: 'Этот номер уже подключён к вашей компании' }
       : { ok: false as const, error: 'Номер занят другой компанией' };
@@ -40,6 +47,19 @@ export async function checkNumber(raw: string) {
     normalized: `+${digits}`,
     note: 'Номер не должен быть привязан к обычному WhatsApp — иначе Meta откажет на своём шаге.',
   };
+}
+
+/**
+ * Phone Number ID уникален на всю платформу. Если он уже у другой
+ * компании, create падал с необработанной ошибкой уникальности —
+ * пользователь видел белый экран вместо объяснения.
+ */
+async function numberOwnedByOther(phoneNumberId: string, companyId: string) {
+  const row = await prisma.whatsAppPhoneNumber.findUnique({
+    where: { phoneNumberId },
+    select: { companyId: true },
+  });
+  return Boolean(row && row.companyId !== companyId);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -57,7 +77,14 @@ export async function completeEmbeddedSignup(input: {
   wabaId: string;
   phoneNumberId: string;
 }) {
-  const { company, db } = await requireCompany();
+  const { company, db, user } = await requireCompany();
+
+  if (!/^\d{5,25}$/.test(input.wabaId) || !/^\d{5,25}$/.test(input.phoneNumberId) || !input.code) {
+    return { ok: false as const, error: 'Meta вернула неполные данные подключения' };
+  }
+  if (await numberOwnedByOther(input.phoneNumberId, company.id)) {
+    return { ok: false as const, error: 'Этот номер уже подключён к другой компании на платформе' };
+  }
 
   const appId = process.env.META_APP_ID;
   const appSecret = process.env.META_APP_SECRET;
@@ -68,7 +95,8 @@ export async function completeEmbeddedSignup(input: {
   // 1. Код → токен доступа бизнеса клиента.
   let accessToken: string;
   try {
-    const url = `${GRAPH}/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&code=${input.code}`;
+    const query = new URLSearchParams({ client_id: appId, client_secret: appSecret, code: input.code });
+    const url = `${GRAPH}/oauth/access_token?${query}`;
     const response = await fetch(url);
     const data = (await response.json()) as { access_token?: string; error?: { message?: string } };
 
@@ -178,6 +206,7 @@ export async function completeEmbeddedSignup(input: {
       action: 'whatsapp.number.connected',
       entityType: 'WhatsAppPhoneNumber',
       entityId: input.phoneNumberId,
+      actorUserId: user.id,
       metadata: { via: 'embedded_signup', wabaId: input.wabaId, company: company.name },
     } as never,
   });
@@ -191,7 +220,7 @@ export async function completeEmbeddedSignup(input: {
    ───────────────────────────────────────────────────────────── */
 
 export async function connectNumber(formData: FormData) {
-  const { db } = await requireCompany();
+  const { company, db, user } = await requireCompany();
 
   const wabaId = String(formData.get('wabaId') ?? '').trim();
   const phoneNumberId = String(formData.get('phoneNumberId') ?? '').trim();
@@ -200,6 +229,12 @@ export async function connectNumber(formData: FormData) {
 
   if (!wabaId || !phoneNumberId || !displayPhoneNumber || !token) {
     return { ok: false as const, error: 'Заполните все поля' };
+  }
+  if (!/^\d{5,25}$/.test(wabaId) || !/^\d{5,25}$/.test(phoneNumberId)) {
+    return { ok: false as const, error: 'WABA ID и Phone Number ID состоят только из цифр — скопируйте их из WhatsApp Manager' };
+  }
+  if (await numberOwnedByOther(phoneNumberId, company.id)) {
+    return { ok: false as const, error: 'Этот Phone Number ID уже подключён к другой компании на платформе' };
   }
 
   let encrypted: string;
@@ -233,7 +268,7 @@ export async function connectNumber(formData: FormData) {
   }
 
   await db.auditLog.create({
-    data: { action: 'whatsapp.number.connected', entityType: 'WhatsAppPhoneNumber', entityId: phoneNumberId } as never,
+    data: { action: 'whatsapp.number.connected', actorUserId: user.id, entityType: 'WhatsAppPhoneNumber', entityId: phoneNumberId, metadata: { via: 'manual' } } as never,
   });
 
   revalidatePath('/whatsapp');
@@ -241,10 +276,14 @@ export async function connectNumber(formData: FormData) {
 }
 
 export async function disconnectNumber(numberId: string) {
-  const { db } = await requireCompany();
-  await db.whatsAppPhoneNumber.updateMany({ where: { id: numberId }, data: { status: 'DISCONNECTED' } });
+  const { db, user } = await requireCompany();
+  const { count } = await db.whatsAppPhoneNumber.updateMany({
+    where: { id: numberId, status: { not: 'DISCONNECTED' } },
+    data: { status: 'DISCONNECTED' },
+  });
+  if (count === 0) return;
   await db.auditLog.create({
-    data: { action: 'whatsapp.number.disconnected', entityType: 'WhatsAppPhoneNumber', entityId: numberId } as never,
+    data: { action: 'whatsapp.number.disconnected', actorUserId: user.id, entityType: 'WhatsAppPhoneNumber', entityId: numberId } as never,
   });
   revalidatePath('/whatsapp');
 }

@@ -6,17 +6,32 @@ import { isWindowOpen } from '@wa/core';
 
 export const dynamic = 'force-dynamic';
 
-type Props = { searchParams: Promise<{ id?: string; filter?: string }> };
+type Props = { searchParams: Promise<{ id?: string; filter?: string; q?: string }> };
 
 export default async function ConversationsPage({ searchParams }: Props) {
-  const { id, filter = 'all' } = await searchParams;
-  const { company, db } = await requireCompany();
+  const { id, filter = 'all', q = '' } = await searchParams;
+  const { company, db, user } = await requireCompany();
 
-  const where =
+  const base =
     filter === 'unread' ? { unreadCount: { gt: 0 } }
     : filter === 'human' ? { mode: 'HUMAN' as const }
     : filter === 'closed' ? { status: 'CLOSED' as const }
     : {};
+
+  // Поиск по имени и номеру: в номере игнорируем пробелы, плюсы и скобки.
+  const query = q.trim().slice(0, 60);
+  const digits = query.replace(/\D/g, '');
+  const where = query
+    ? {
+        ...base,
+        customer: {
+          OR: [
+            { name: { contains: query, mode: 'insensitive' as const } },
+            ...(digits.length >= 3 ? [{ waId: { contains: digits } }] : []),
+          ],
+        },
+      }
+    : base;
 
   const conversations = await db.conversation.findMany({
     where,
@@ -42,7 +57,7 @@ export default async function ConversationsPage({ searchParams }: Props) {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
       <div className="main">
         <header className="top">
           <h1>Диалоги</h1>
@@ -54,6 +69,7 @@ export default async function ConversationsPage({ searchParams }: Props) {
         <div className="inbox">
           <ConversationList
             filter={filter}
+            query={query}
             activeId={activeId}
             items={conversations.map((c) => ({
               id: c.id,

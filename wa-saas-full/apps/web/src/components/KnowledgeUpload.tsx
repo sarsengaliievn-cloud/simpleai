@@ -15,12 +15,15 @@ export function KnowledgeUpload() {
 
   const submitFile = () => {
     const file = fileRef.current?.files?.[0];
-    if (!file) return;
+    if (!file) { setError('Выберите файл'); return; }
+    if (file.size > 20 * 1024 * 1024) { setError('Файл больше 20 МБ'); return; }
     const data = new FormData();
     data.set('file', file);
     setError(null);
     start(async () => {
-      const result = await uploadDocument(data);
+      // Сбой самого запроса (обрыв сети, лимит прокси) приходит исключением,
+      // а не результатом — без catch кнопка просто «отжималась» без объяснений.
+      const result = await uploadDocument(data).catch(() => ({ ok: false as const, error: 'Не удалось загрузить файл. Проверьте соединение и попробуйте ещё раз.' }));
       if (!result.ok) setError(result.error);
       else {
         if (fileRef.current) fileRef.current.value = '';
@@ -33,7 +36,7 @@ export function KnowledgeUpload() {
   const submitNote = () => {
     setError(null);
     start(async () => {
-      const result = await addManualNote(title, text);
+      const result = await addManualNote(title, text).catch(() => ({ ok: false as const, error: 'Не удалось сохранить. Попробуйте ещё раз.' }));
       if (!result.ok) setError(result.error);
       else { setTitle(''); setText(''); setTimeout(() => router.refresh(), 1500); }
     });

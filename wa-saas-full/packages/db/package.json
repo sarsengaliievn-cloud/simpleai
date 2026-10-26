@@ -12,7 +12,8 @@
     "studio": "dotenv -e ../../.env -- prisma studio",
     "seed": "dotenv -e ../../.env -- tsx src/seed.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "baseline": "dotenv -e ../../.env -- tsx src/baseline-local.ts && dotenv -e ../../.env -- prisma migrate resolve --applied 0_init"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"

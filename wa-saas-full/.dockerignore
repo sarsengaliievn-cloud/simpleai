@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/dist
+**/*.tsbuildinfo
+.git
+.env
+.env.*
+!.env.example
+_backup-*
+backups
+*.log
+.DS_Store

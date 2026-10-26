@@ -1,6 +1,6 @@
 import { prisma } from '@wa/db';
 import { getProvider } from '@wa/whatsapp';
-import { inboundMessageQueue } from '@/lib/queue';
+import { inboundMessageQueue, JOB_CLEANUP } from '@/lib/queue';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,6 +15,22 @@ export async function GET(request: Request) {
     return new Response(challenge ?? '', { status: 200 });
   }
   return new Response('forbidden', { status: 403 });
+}
+
+async function enqueue(eventId: string, retry = false) {
+  // jobId = id события: даже если Meta пришлёт дубль в ту же секунду,
+  // BullMQ не поставит вторую задачу. Для повтора упавшего события id
+  // другой — старая задача ещё лежит в списке упавших и заняла бы его.
+  await inboundMessageQueue.add(
+    'inbound',
+    { webhookEventId: eventId },
+    {
+      jobId: retry ? `${eventId}-retry-${Date.now()}` : eventId,
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 2000 },
+      ...JOB_CLEANUP,
+    },
+  );
 }
 
 /**
@@ -36,25 +52,32 @@ export async function POST(request: Request) {
     return new Response('bad request', { status: 400 });
   }
 
+  // Статусы доставки (sent/delivered/read) сюда тоже приходят, но
+  // сообщений в них нет — подтверждаем и выходим.
   const messages = getProvider().parseWebhook(payload);
   if (messages.length === 0) return new Response('ok', { status: 200 });
 
   // Ключ дедупликации: Meta может прислать одно событие несколько раз.
-  const externalId = messages[0]!.providerMessageId;
+  const externalId = messages.map((m) => m.providerMessageId).sort().join('|').slice(0, 500);
 
   try {
     const event = await prisma.webhookEvent.create({
       data: { externalId, payload: payload as never },
     });
-    await inboundMessageQueue.add(
-      'inbound',
-      { webhookEventId: event.id },
-      { attempts: 5, backoff: { type: 'exponential', delay: 2000 }, removeOnComplete: 1000 },
-    );
+    await enqueue(event.id);
   } catch (error) {
-    // Уникальный индекс по externalId — повторная доставка того же события.
-    if ((error as { code?: string }).code !== 'P2002') {
+    if ((error as { code?: string }).code === 'P2002') {
+      // Повторная доставка. Если в прошлый раз событие записали, но в
+      // очередь не положили (упал Redis) — даём ему второй шанс, иначе
+      // сообщение клиента потерялось бы навсегда.
+      const existing = await prisma.webhookEvent.findUnique({ where: { externalId } });
+      if (existing && (existing.status === 'RECEIVED' || existing.status === 'FAILED')) {
+        await enqueue(existing.id, existing.status === 'FAILED').catch((e) => console.error('[webhook] повторная постановка не удалась:', e));
+      }
+    } else {
       console.error('[webhook] ошибка приёма:', error);
+      // 500 — Meta повторит доставку позже, событие не потеряется.
+      return new Response('temporary error', { status: 500 });
     }
   }
 

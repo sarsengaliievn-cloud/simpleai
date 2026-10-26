@@ -14,7 +14,7 @@ const STATUS: Record<string, [string, string]> = {
 };
 
 export default async function WhatsAppPage() {
-  const { company, db } = await requireCompany();
+  const { company, db, user } = await requireCompany();
 
   const numbers = await db.whatsAppPhoneNumber.findMany({
     orderBy: { createdAt: 'asc' },
@@ -29,7 +29,7 @@ export default async function WhatsAppPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
       <div className="main">
         <header className="top">
           <h1>WhatsApp</h1>
