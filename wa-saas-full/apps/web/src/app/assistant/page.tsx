@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 
 const TONES = ['Дружелюбный', 'Профессиональный', 'Короткий', 'Подробный', 'Формальный'];
 const LANGS: Array<[string, string]> = [['ru', 'Русский'], ['kk', 'Қазақша'], ['en', 'English']];
+const DAYS: Array<[number, string]> = [[1, 'Пн'], [2, 'Вт'], [3, 'Ср'], [4, 'Чт'], [5, 'Пт'], [6, 'Сб'], [7, 'Вс']];
 
 type Props = { searchParams: Promise<{ saved?: string }> };
 
@@ -19,6 +20,9 @@ export default async function AssistantPage({ searchParams }: Props) {
     goals: ['отвечать на вопросы о наличии, размерах и цене', 'рассказывать про доставку', 'собирать заявки на заказ'],
     tone: 'Дружелюбный', languages: ['ru', 'kk'], forbidden: 'Давать скидки. Обещать сроки, которых нет в базе знаний. Выдумывать наличие товара.',
     extraRules: '', confidenceThreshold: 70, advancedMode: false, advancedPrompt: '',
+    replyDelaySec: 8, splitReplies: true, splitMaxChars: 350,
+    workingHoursEnabled: false, workingDays: [1, 2, 3, 4, 5, 6, 7], workStart: '09:00', workEnd: '21:00',
+    offHoursMessage: '', transcribeVoice: true,
   };
 
   const preview = buildSystemPrompt(config, company);
@@ -102,6 +106,79 @@ export default async function AssistantPage({ searchParams }: Props) {
                   выше 85% он начнёт звать человека почти всегда.
                 </span>
               </label>
+            </div>
+
+            <div className="card card-p" style={{ marginBottom: 16 }}>
+              <div style={{ fontWeight: 700 }}>Автоматизация</div>
+              <p className="small muted" style={{ marginTop: 4, marginBottom: 16 }}>
+                Чтобы ассистент вёл себя как живой менеджер, а не как бот.
+              </p>
+
+              <label className="field">
+                <span className="label">Ждать, пока клиент допишет, сек</span>
+                <input className="input" type="number" name="replyDelaySec" min={0} max={60}
+                       defaultValue={config.replyDelaySec} style={{ maxWidth: 140 }} />
+                <span className="hint">
+                  Клиенты пишут по частям: «Здравствуйте» → «есть 42?» → «чёрные». Ассистент ждёт
+                  столько секунд после последнего сообщения и отвечает на всё сразу. 0 — отвечать мгновенно.
+                </span>
+              </label>
+
+              <div className="field">
+                <label className="row" style={{ justifyContent: 'space-between' }}>
+                  <span className="label" style={{ margin: 0 }}>Длинный ответ — несколькими сообщениями</span>
+                  <input type="checkbox" name="splitReplies" defaultChecked={config.splitReplies} />
+                </label>
+                <div className="row small" style={{ marginTop: 8, gap: 8 }}>
+                  <span className="muted">Не длиннее</span>
+                  <input className="input" type="number" name="splitMaxChars" min={120} max={1000}
+                         defaultValue={config.splitMaxChars} style={{ maxWidth: 110 }} />
+                  <span className="muted">символов в одном сообщении</span>
+                </div>
+                <span className="hint">Части уходят с паузой в 1–4 секунды, как будто их набирают.</span>
+              </div>
+
+              <div className="field">
+                <label className="row" style={{ justifyContent: 'space-between' }}>
+                  <span className="label" style={{ margin: 0 }}>Расшифровывать голосовые</span>
+                  <input type="checkbox" name="transcribeVoice" defaultChecked={config.transcribeVoice} />
+                </label>
+                <span className="hint">
+                  Ассистент слушает голосовое (русский и казахский), отвечает на него как на текст,
+                  а расшифровка видна в диалоге. Выключено — голосовые сразу уходят менеджеру.
+                </span>
+              </div>
+
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="row" style={{ justifyContent: 'space-between' }}>
+                  <span className="label" style={{ margin: 0 }}>Рабочие часы ассистента</span>
+                  <input type="checkbox" name="workingHoursEnabled" defaultChecked={config.workingHoursEnabled} />
+                </label>
+                <div className="row small" style={{ marginTop: 10, gap: 12, flexWrap: 'wrap' }}>
+                  {DAYS.map(([day, label]) => (
+                    <label className="row" key={day} style={{ gap: 5 }}>
+                      <input type="checkbox" name="workingDays" value={day}
+                             defaultChecked={config.workingDays.includes(day)} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div className="row small" style={{ marginTop: 10, gap: 8 }}>
+                  <span className="muted">с</span>
+                  <input className="input" type="time" name="workStart" defaultValue={config.workStart} style={{ maxWidth: 130 }} />
+                  <span className="muted">до</span>
+                  <input className="input" type="time" name="workEnd" defaultValue={config.workEnd} style={{ maxWidth: 130 }} />
+                </div>
+                <span className="hint">
+                  Время по часовому поясу компании ({company.timezone}). Начало позже конца — ночная смена:
+                  например, 21:00–09:00, чтобы ассистент закрывал ночь, а днём писали менеджеры.
+                  Вне графика ассистент молчит, сообщения ждут менеджера.
+                </span>
+                <textarea className="textarea" name="offHoursMessage" style={{ marginTop: 10, minHeight: 70 }}
+                          defaultValue={config.offHoursMessage}
+                          placeholder="Сообщение вне графика (необязательно). Например: Спасибо! Мы работаем с 9:00 до 21:00 — ответим утром." />
+                <span className="hint">Уходит клиенту один раз, не чаще раза в 12 часов. Пусто — ассистент просто молчит.</span>
+              </div>
             </div>
 
             <div className="card card-p" style={{ marginBottom: 16 }}>

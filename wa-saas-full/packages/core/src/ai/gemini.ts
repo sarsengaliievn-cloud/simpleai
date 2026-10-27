@@ -1,4 +1,4 @@
-import type { AIProvider, GenerateOptions, GenerateResult } from './provider.js';
+import { MAX_AUDIO_BYTES, TRANSCRIBE_PROMPT, type AIProvider, type GenerateOptions, type GenerateResult } from './provider.js';
 
 /** Переопределяется через GEMINI_BASE_URL — для прокси или тестового стенда. */
 const BASE = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/$/, '');
@@ -17,7 +17,44 @@ export class GeminiProvider implements AIProvider {
     private readonly apiKey = process.env.GEMINI_API_KEY ?? '',
     private readonly model = process.env.AI_MODEL ?? 'gemini-2.5-flash',
     private readonly embedModel = process.env.AI_EMBED_MODEL ?? 'gemini-embedding-001',
+    /** Расшифровка — та же модель, если не задана отдельная. */
+    private readonly transcribeModel = process.env.AI_TRANSCRIBE_MODEL || process.env.AI_MODEL || 'gemini-2.5-flash',
   ) {}
+
+  /** Gemini слушает аудио сам: отдельный сервис распознавания речи не нужен. */
+  async transcribe(audio: Buffer, mimeType: string): Promise<string> {
+    if (!this.apiKey) throw new Error('GEMINI_API_KEY не задан');
+    if (audio.length > MAX_AUDIO_BYTES) throw new Error('Голосовое слишком большое для расшифровки');
+
+    const response = await fetch(`${BASE}/models/${this.transcribeModel}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
+      body: JSON.stringify({
+        contents: [{
+          role: 'user',
+          parts: [
+            // «audio/ogg; codecs=opus» → «audio/ogg»: параметры кодека Gemini не принимает.
+            { inline_data: { mime_type: mimeType.split(';')[0]!.trim() || 'audio/ogg', data: audio.toString('base64') } },
+            { text: TRANSCRIBE_PROMPT },
+          ],
+        }],
+        generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Gemini (расшифровка) вернул ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    }
+
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+    };
+    return (data.candidates?.[0]?.content?.parts ?? [])
+      .filter((p) => !p.thought)
+      .map((p) => p.text ?? '')
+      .join('')
+      .trim();
+  }
 
   async generate(options: GenerateOptions): Promise<GenerateResult> {
     if (!this.apiKey) throw new Error('GEMINI_API_KEY не задан');

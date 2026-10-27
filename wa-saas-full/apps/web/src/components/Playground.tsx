@@ -10,6 +10,8 @@ type Turn = {
   confidence?: number;
   needsHuman?: boolean;
   sources?: string[];
+  /** Ответ, разбитый так же, как он ушёл бы клиенту в WhatsApp. */
+  parts?: string[];
 };
 
 export function Playground({ tone, threshold, documents }: { tone: string; threshold: number; documents: number }) {
@@ -45,6 +47,7 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
               service: !json.answer || json.needsHuman,
               confidence: json.confidence,
               needsHuman: json.needsHuman,
+              parts: Array.isArray(json.parts) && json.answer && !json.needsHuman ? json.parts : undefined,
               sources: [...new Set<string>(json.hits?.slice(0, 3).map((h: { title: string }) => h.title) ?? [])].slice(0, 2),
             }
           : { role: 'assistant', content: json.error ?? `Ошибка ${res.status}`, service: true },
@@ -88,7 +91,9 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
 
           {turns.map((t, i) => (
             <div key={i} style={{ display: 'contents' }}>
-              <div className={`msg ${t.role === 'user' ? 'msg-in' : 'msg-out'}`}>{t.content}</div>
+              {(t.parts?.length ? t.parts : [t.content]).map((part, j) => (
+                <div key={j} className={`msg ${t.role === 'user' ? 'msg-in' : 'msg-out'}`}>{part}</div>
+              ))}
               {t.role === 'assistant' && t.confidence !== undefined && (
                 <div className="tiny muted" style={{ alignSelf: 'flex-end', marginTop: -5 }}>
                   уверенность {t.confidence}%

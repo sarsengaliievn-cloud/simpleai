@@ -2,6 +2,7 @@ export * from './provider.js';
 export { AnthropicProvider } from './anthropic.js';
 export { GeminiProvider } from './gemini.js';
 export { getAI } from './factory.js';
+export { transcribeAudio } from './transcribe.js';
 export { chunkText, estimateTokens } from './chunk.js';
 export { buildSystemPrompt } from './prompt.js';
 export type { AIConfigLike } from './prompt.js';

@@ -8,6 +8,7 @@ import type {
   PhoneNumberInfo,
 } from './types.js';
 import { verifyMetaSignature } from './signature.js';
+import { downloadCloudMedia, MAX_MEDIA_BYTES, type DownloadedMedia } from './media.js';
 
 /**
  * Мок для разработки: наружу ничего не отправляет, пишет в консоль.
@@ -58,6 +59,25 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
   async subscribeApp() {}
 
   async registerNumber() {}
+
+  /**
+   * Для проверки голосовых без боевого номера: в тестовом вебхуке вместо
+   * media id можно указать ссылку на .ogg/.mp3 — мок скачает её. Только вне
+   * production: иначе любой, кто шлёт вебхуки, заставил бы сервер ходить
+   * по произвольным адресам. Настоящий media id идёт в Cloud API как обычно.
+   */
+  async downloadMedia({ mediaId, accessToken }: { mediaId: string; accessToken: string | null }): Promise<DownloadedMedia> {
+    if (/^https?:\/\//.test(mediaId)) {
+      if (process.env.NODE_ENV === 'production') throw new Error('Ссылки вместо media id запрещены в production');
+      const response = await fetch(mediaId);
+      if (!response.ok) throw new Error(`Тестовый файл: ${response.status}`);
+      const data = Buffer.from(await response.arrayBuffer());
+      if (data.length > MAX_MEDIA_BYTES) throw new Error('Файл больше 16 МБ');
+      return { data, mimeType: response.headers.get('content-type') ?? 'audio/ogg' };
+    }
+    if (!accessToken) throw new Error('Нет токена WhatsApp-аккаунта для скачивания файла');
+    return downloadCloudMedia(mediaId, accessToken);
+  }
 }
 
 /** Время Meta — секунды строкой. Битое значение не должно ронять запись в базу. */

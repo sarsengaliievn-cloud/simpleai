@@ -37,6 +37,9 @@ type Conversation = {
 };
 
 const AUTHOR: Record<string, string> = { AI: 'Ассистент', MANAGER: 'Менеджер' };
+const ATTACH: Record<string, string> = {
+  IMAGE: 'фото', VIDEO: 'видео', DOCUMENT: 'файл', LOCATION: 'геолокация', UNSUPPORTED: 'стикер или реакция',
+};
 
 export function ThreadView({
   conversation,
@@ -116,7 +119,12 @@ export function ThreadView({
             </div>
           ) : (
             <div key={m.id} className={`msg ${m.direction === 'INBOUND' ? 'msg-in' : 'msg-out'}`}>
-              {m.text ?? <em className="small">Вложение: {m.type.toLowerCase()}</em>}
+              {m.type === 'AUDIO' && (
+                <span className="tiny muted" style={{ display: 'block', marginBottom: m.text ? 3 : 0 }}>
+                  {m.text ? 'Голосовое · расшифровка' : 'Голосовое сообщение'}
+                </span>
+              )}
+              {m.text ?? (m.type === 'AUDIO' ? null : <em className="small">Вложение: {ATTACH[m.type] ?? m.type.toLowerCase()}</em>)}
               <span className="msg-t">
                 {clockWithDay(m.createdAt)}
                 {AUTHOR[m.authorType] ? ` · ${AUTHOR[m.authorType]}` : ''}

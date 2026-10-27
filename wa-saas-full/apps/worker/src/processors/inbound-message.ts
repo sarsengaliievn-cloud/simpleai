@@ -1,7 +1,7 @@
 import { prisma, forCompany } from '@wa/db';
 import { getProvider, type InboundMessage, type StatusUpdate } from '@wa/whatsapp';
 import { windowExpiryFrom, type InboundMessageJob } from '@wa/core';
-import { generateAiReply } from './ai-reply.js';
+import { scheduleAiReply } from '../queues.js';
 
 /**
  * Разбор события вебхука: клиент, диалог, сообщение, ответ ассистента.
@@ -165,8 +165,9 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
     });
   }
 
+  let saved: { id: string };
   try {
-    await db.message.create({
+    saved = await db.message.create({
       data: {
         conversationId: conversation.id,
         direction: 'INBOUND',
@@ -180,6 +181,7 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
         sentAt: inbound.timestamp,
         metadata: inbound.mediaId ? { mediaId: inbound.mediaId } : undefined,
       } as never,
+      select: { id: true },
     });
   } catch (error) {
     // Параллельный дубль успел раньше — это не ошибка, просто выходим.
@@ -204,19 +206,22 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
     data: { lastContactAt: inbound.timestamp },
   });
 
-  // Ответ ассистента. Ошибка здесь не должна ронять приём сообщения:
-  // сообщение клиента уже сохранено, менеджер увидит его в любом случае.
-  if (conversation.mode === 'AI' && inbound.type === 'text') {
+  // Ответ ассистента — отдельной отложенной задачей (буферизация). Голосовые
+  // расшифровывает уже она: так расшифровка не гоняется наперегонки со
+  // следующим сообщением клиента. Ошибка постановки не должна ронять приём:
+  // сообщение уже сохранено, менеджер его увидит.
+  const config = await db.aIConfiguration.findFirst();
+  if (conversation.mode === 'AI' && config?.enabled) {
     try {
-      await generateAiReply({
-        companyId: number.companyId,
-        conversationId: conversation.id,
-        inboundProviderMessageId: inbound.providerMessageId,
-      });
+      await scheduleAiReply(
+        { companyId: number.companyId, conversationId: conversation.id, inboundMessageId: saved.id },
+        config.replyDelaySec,
+      );
     } catch (error) {
-      console.error('[ai] сбой генерации:', (error as Error).message);
+      console.error('[ai] не удалось поставить ответ в очередь:', (error as Error).message);
     }
   }
 
   return number.companyId;
 }
+

@@ -1,5 +1,5 @@
 import { requireCompany } from '@/lib/session';
-import { answerQuestion } from '@wa/core';
+import { answerQuestion, splitReply } from '@wa/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +50,8 @@ export async function POST(request: Request) {
 
     return Response.json({
       answer: result.answer,
+      // Как ответ уйдёт в WhatsApp — тестовый чат показывает те же части.
+      parts: config.splitReplies && result.answer ? splitReply(result.answer, config.splitMaxChars) : [result.answer],
       confidence: result.confidence,
       modelConfidence: result.modelConfidence,
       topScore: Math.round(result.topScore * 100),

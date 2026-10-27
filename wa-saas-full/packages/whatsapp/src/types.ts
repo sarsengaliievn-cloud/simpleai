@@ -74,6 +74,8 @@ export interface WhatsAppProvider {
   subscribeApp(input: SendAuth & { wabaId: string }): Promise<void>;
   /** Регистрация номера в Cloud API (PIN двухэтапной проверки). */
   registerNumber(input: SendAuth & { phoneNumberId: string; pin: string }): Promise<void>;
+  /** Вложение из входящего сообщения (голосовое, фото). Токен — WABA компании. */
+  downloadMedia(params: { mediaId: string; accessToken: string | null }): Promise<{ data: Buffer; mimeType: string }>;
 }
 
 /**

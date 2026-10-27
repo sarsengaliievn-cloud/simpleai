@@ -12,10 +12,10 @@ import { WhatsAppSendError } from './types.js';
 import { parseMetaWebhook, parseMetaStatuses } from './mock.js';
 import { verifyMetaSignature } from './signature.js';
 
-/** Переопределяется для тестового стенда или прокси. */
-export function graphBase() {
-  return (process.env.WHATSAPP_GRAPH_URL || 'https://graph.facebook.com/v24.0').replace(/\/$/, '');
-}
+import { graphBase } from './graph.js';
+import { downloadCloudMedia, type DownloadedMedia } from './media.js';
+
+export { graphBase };
 
 type GraphError = {
   error?: {
@@ -206,5 +206,10 @@ export class CloudApiWhatsAppProvider implements WhatsAppProvider {
       method: 'POST',
       body: { messaging_product: 'whatsapp', pin: input.pin },
     });
+  }
+
+  async downloadMedia({ mediaId, accessToken }: { mediaId: string; accessToken: string | null }): Promise<DownloadedMedia> {
+    if (!accessToken) throw new Error('Нет токена WhatsApp-аккаунта для скачивания файла');
+    return downloadCloudMedia(mediaId, accessToken);
   }
 }
