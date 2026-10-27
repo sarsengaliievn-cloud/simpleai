@@ -95,6 +95,8 @@ if [ ! -f .env.production ]; then
     ACME_EMAIL=$(ask "Email для HTTPS-сертификата (Let's Encrypt пишет только о проблемах с ним)")
   done
   GEMINI_API_KEY=$(ask_secret "Ключ Gemini API (ввод скрыт, можно пропустить и вписать позже)")
+  # Ключ часто копируют из .env вместе с кавычками — они сломали бы файл настроек.
+  GEMINI_API_KEY=$(printf '%s' "$GEMINI_API_KEY" | tr -d '"'"'"' \t\r\n')
 
   gen() { openssl rand -base64 32 | tr -d '\n'; }
   umask 077
@@ -149,6 +151,8 @@ if [ -n "$SERVER_IP" ] && [ "$SERVER_IP" != "$DNS_IP" ]; then
 fi
 
 # ── 8. Сборка и запуск ──────────────────────────────────────────
+# </dev/null у exec и run обязателен: при запуске через `curl | bash` скрипт
+# читается из stdin, и docker съел бы его остаток — установка молча оборвалась бы.
 dc() { docker compose -f docker-compose.prod.yml --env-file .env.production "$@"; }
 
 say "Собираю приложение (на маленьком сервере 5–10 минут)"
@@ -158,7 +162,7 @@ dc up -d
 
 say "Жду, пока панель поднимется"
 for _ in $(seq 1 60); do
-  if dc exec -T web node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
+  if dc exec -T web node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" </dev/null 2>/dev/null; then
     HEALTHY=1; break
   fi
   sleep 5
@@ -169,7 +173,7 @@ done
 say "Проверяю, что структура базы совпадает со схемой"
 if dc run --rm --no-deps -T migrate node_modules/.bin/prisma migrate diff \
      --from-url "postgresql://wa:$(grep -E '^POSTGRES_PASSWORD=' .env.production | cut -d= -f2- | tr -d '"')@postgres:5432/wa_saas" \
-     --to-schema-datamodel prisma/schema.prisma --exit-code >/tmp/schema-diff.txt 2>&1; then
+     --to-schema-datamodel prisma/schema.prisma --exit-code </dev/null >/tmp/schema-diff.txt 2>&1; then
   echo "База совпадает со схемой."
 else
   warn "База отличается от схемы — пришлите это разработчику:"; cat /tmp/schema-diff.txt

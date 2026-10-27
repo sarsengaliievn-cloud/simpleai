@@ -27,7 +27,7 @@ say "Перезапускаю: миграции применятся автом�
 dc up -d --remove-orphans
 
 for _ in $(seq 1 60); do
-  if dc exec -T web node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
+  if dc exec -T web node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" </dev/null 2>/dev/null; then
     HEALTHY=1; break
   fi
   sleep 5
