@@ -13,6 +13,8 @@ type Message = {
   status: 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED';
   errorCode: string | null;
   createdAt: Date;
+  /** Менеджер написал из приложения WhatsApp на телефоне. */
+  fromPhone?: boolean;
 };
 
 /** Как в самом WhatsApp: одна галочка — отправлено, две — доставлено, синие — прочитано. */
@@ -127,7 +129,7 @@ export function ThreadView({
               {m.text ?? (m.type === 'AUDIO' ? null : <em className="small">Вложение: {ATTACH[m.type] ?? m.type.toLowerCase()}</em>)}
               <span className="msg-t">
                 {clockWithDay(m.createdAt)}
-                {AUTHOR[m.authorType] ? ` · ${AUTHOR[m.authorType]}` : ''}
+                {AUTHOR[m.authorType] ? ` · ${AUTHOR[m.authorType]}${m.fromPhone ? ' с телефона' : ''}` : ''}
                 {m.direction === 'OUTBOUND' && <Ticks status={m.status} errorCode={m.errorCode} />}
               </span>
             </div>

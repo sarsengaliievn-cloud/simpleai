@@ -4,12 +4,13 @@ import type {
   OutboundTemplateMessage,
   SendResult,
   InboundMessage,
+  EchoMessage,
   StatusUpdate,
   PhoneNumberInfo,
   SendAuth,
 } from './types.js';
 import { WhatsAppSendError } from './types.js';
-import { parseMetaWebhook, parseMetaStatuses } from './mock.js';
+import { parseMetaWebhook, parseMetaStatuses, parseMetaEchoes } from './mock.js';
 import { verifyMetaSignature } from './signature.js';
 
 import { graphBase } from './graph.js';
@@ -169,6 +170,10 @@ export class CloudApiWhatsAppProvider implements WhatsAppProvider {
 
   parseStatuses(payload: unknown): StatusUpdate[] {
     return parseMetaStatuses(payload);
+  }
+
+  parseEchoes(payload: unknown): EchoMessage[] {
+    return parseMetaEchoes(payload);
   }
 
   async markRead(input: SendAuth & { phoneNumberId: string; providerMessageId: string }) {

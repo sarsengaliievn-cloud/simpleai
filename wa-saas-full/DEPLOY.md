@@ -104,7 +104,9 @@ cat /opt/saudabot/wa-saas-full/.env.production
 **6.3. Вебхук** — WhatsApp → Configuration → Webhook → Edit:
 - **Callback URL:** `https://app.saudabot.kz/api/webhooks/whatsapp`
 - **Verify token:** значение `META_WEBHOOK_VERIFY_TOKEN` из `.env.production`
-- Verify and save → в списке полей подписаться на **messages**.
+- Verify and save → в списке полей подписаться на **messages** и **smb_message_echoes**.
+  Второе — ответы менеджера с телефона, если номер работает и в приложении WhatsApp Business
+  (Coexistence). Без него ассистент не узнает, что менеджер уже ответил, и влезет в разговор.
 
 **6.4. Номер** — WhatsApp → API Setup → Add phone number. Номер не должен быть
 привязан к обычному WhatsApp (или его сначала удаляют из приложения).
@@ -118,6 +120,8 @@ cat /opt/saudabot/wa-saas-full/.env.production
 
 **6.6. Подключить в панели** — WhatsApp → «Подключить вручную»: WABA ID,
 Phone Number ID, токен. Если номер новый — придумать **PIN** из 6 цифр (сохранить!).
+**Номер уже подключён и работает на телефоне** (статус Connected в WhatsApp Manager) — PIN
+оставить пустым: повторная регистрация не нужна.
 Панель проверит номер в Meta, зарегистрирует его и подпишет на входящие.
 
 **6.7. Проверка** — написать на номер с личного телефона. Сообщение появится в

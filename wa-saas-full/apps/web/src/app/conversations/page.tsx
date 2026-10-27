@@ -102,6 +102,7 @@ export default async function ConversationsPage({ searchParams }: Props) {
                 status: m.status,
                 errorCode: m.errorCode,
                 createdAt: m.createdAt,
+                fromPhone: (m.metadata as { source?: string } | null)?.source === 'phone',
               }))}
             />
           ) : (

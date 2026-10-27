@@ -6,6 +6,7 @@ import type {
   InboundMessage,
   StatusUpdate,
   PhoneNumberInfo,
+  EchoMessage,
 } from './types.js';
 import { verifyMetaSignature } from './signature.js';
 import { downloadCloudMedia, MAX_MEDIA_BYTES, type DownloadedMedia } from './media.js';
@@ -48,6 +49,10 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
 
   parseStatuses(payload: unknown): StatusUpdate[] {
     return parseMetaStatuses(payload);
+  }
+
+  parseEchoes(payload: unknown): EchoMessage[] {
+    return parseMetaEchoes(payload);
   }
 
   async markRead() {}
@@ -134,29 +139,65 @@ export function parseMetaWebhook(payload: unknown): InboundMessage[] {
 
       for (const message of value?.messages ?? []) {
         if (!message?.id || !message?.from) continue;
-        const type = message.type as string;
-
-        // Нажатие кнопки шаблона и выбор из списка — для ассистента это
-        // обычный текстовый ответ клиента.
-        const replyText: string | undefined =
-          message.button?.text ??
-          message.interactive?.button_reply?.title ??
-          message.interactive?.list_reply?.title;
-
         result.push({
           providerMessageId: message.id,
           phoneNumberId,
           from: message.from,
           profileName: names.get(String(message.from)) ?? (names.size === 0 ? fallbackName : undefined),
-          type: replyText
-            ? 'text'
-            : ['text', 'image', 'audio', 'video', 'document', 'location'].includes(type)
-              ? (type as InboundMessage['type'])
-              : 'unsupported',
-          // Подпись к фото/документу Meta кладёт внутрь image/document, а не в корень.
-          text: message.text?.body ?? replyText ?? message[type]?.caption,
-          mediaId: message[type]?.id,
-          mediaMimeType: message[type]?.mime_type,
+          ...messageContent(message),
+          timestamp: metaTime(message.timestamp),
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+/** Тип, текст и вложение — одинаково для входящих и для ответов с телефона. */
+function messageContent(message: any): Pick<InboundMessage, 'type' | 'text' | 'mediaId' | 'mediaMimeType'> {
+  const type = message.type as string;
+  // Нажатие кнопки шаблона и выбор из списка — для ассистента это
+  // обычный текстовый ответ клиента.
+  const replyText: string | undefined =
+    message.button?.text ??
+    message.interactive?.button_reply?.title ??
+    message.interactive?.list_reply?.title;
+
+  return {
+    type: replyText
+      ? 'text'
+      : ['text', 'image', 'audio', 'video', 'document', 'location'].includes(type)
+        ? (type as InboundMessage['type'])
+        : 'unsupported',
+    // Подпись к фото/документу Meta кладёт внутрь image/document, а не в корень.
+    text: message.text?.body ?? replyText ?? message[type]?.caption,
+    mediaId: message[type]?.id,
+    mediaMimeType: message[type]?.mime_type,
+  };
+}
+
+/**
+ * Ответы менеджера из приложения WhatsApp Business (Coexistence):
+ * change.field = "smb_message_echoes", value.message_echoes[].
+ */
+export function parseMetaEchoes(payload: unknown): EchoMessage[] {
+  const result: EchoMessage[] = [];
+  const body = payload as any;
+
+  for (const entry of body?.entry ?? []) {
+    for (const change of entry?.changes ?? []) {
+      const value = change?.value;
+      const phoneNumberId = value?.metadata?.phone_number_id;
+      if (!phoneNumberId) continue;
+
+      for (const message of value?.message_echoes ?? []) {
+        if (!message?.id || !message?.to) continue;
+        result.push({
+          providerMessageId: message.id,
+          phoneNumberId,
+          to: String(message.to),
+          ...messageContent(message),
           timestamp: metaTime(message.timestamp),
         });
       }

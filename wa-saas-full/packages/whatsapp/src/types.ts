@@ -36,6 +36,23 @@ export interface InboundMessage {
   timestamp: Date;
 }
 
+/**
+ * Сообщение, которое менеджер отправил клиенту сам — из приложения
+ * WhatsApp Business на телефоне (режим Coexistence). Meta присылает его
+ * копию событием smb_message_echoes.
+ */
+export interface EchoMessage {
+  providerMessageId: string;
+  phoneNumberId: string;
+  /** Номер клиента. */
+  to: string;
+  type: InboundMessage['type'];
+  text?: string;
+  mediaId?: string;
+  mediaMimeType?: string;
+  timestamp: Date;
+}
+
 /** Статус ранее отправленного нами сообщения: sent → delivered → read, или failed. */
 export interface StatusUpdate {
   providerMessageId: string;
@@ -66,6 +83,8 @@ export interface WhatsAppProvider {
   verifySignature(rawBody: string, signatureHeader: string | null): boolean;
   parseWebhook(payload: unknown): InboundMessage[];
   parseStatuses(payload: unknown): StatusUpdate[];
+  /** Ответы менеджера с телефона (Coexistence). */
+  parseEchoes(payload: unknown): EchoMessage[];
   /** Синие галочки у клиента. Не критично: сбой только пишется в лог. */
   markRead(input: SendAuth & { phoneNumberId: string; providerMessageId: string }): Promise<void>;
   /** Проверка токена и номера при подключении. */

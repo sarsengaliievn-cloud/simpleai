@@ -1,5 +1,5 @@
 import { prisma, forCompany } from '@wa/db';
-import { getProvider, type InboundMessage, type StatusUpdate } from '@wa/whatsapp';
+import { getProvider, type InboundMessage, type StatusUpdate, type EchoMessage } from '@wa/whatsapp';
 import { windowExpiryFrom, type InboundMessageJob } from '@wa/core';
 import { scheduleAiReply } from '../queues.js';
 
@@ -29,6 +29,16 @@ export async function processInboundMessage({ webhookEventId }: InboundMessageJo
 
     for (const inbound of messages) {
       const owner = await handleOne(inbound);
+      if (owner) {
+        companyId = owner;
+        handled += 1;
+      }
+    }
+
+    // Менеджер ответил клиенту с телефона (Coexistence) — сохраняем в
+    // переписку и убираем ассистента из этого диалога.
+    for (const echo of provider.parseEchoes(event.payload)) {
+      const owner = await handleEcho(echo);
       if (owner) {
         companyId = owner;
         handled += 1;
@@ -225,3 +235,85 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
   return number.companyId;
 }
 
+/**
+ * Ответ менеджера из приложения WhatsApp Business на телефоне.
+ *
+ * Номер в режиме Coexistence работает и в панели, и на телефоне. Если
+ * менеджер уже пишет клиенту с телефона, ассистент не должен влезать в
+ * разговор: диалог переходит менеджеру. Вернуть ассистента — кнопкой в панели.
+ */
+async function handleEcho(echo: EchoMessage): Promise<string | null> {
+  const number = await prisma.whatsAppPhoneNumber.findUnique({ where: { phoneNumberId: echo.phoneNumberId } });
+  if (!number || number.status === 'DISCONNECTED') return null;
+
+  const db = forCompany(prisma, number.companyId);
+
+  // Повтор задачи или сообщение, которое мы сами отправили через API.
+  const already = await db.message.findFirst({ where: { providerMessageId: echo.providerMessageId }, select: { id: true } });
+  if (already) return number.companyId;
+
+  // Менеджер мог написать первым — клиента в базе ещё нет.
+  await db.customer.createMany({
+    data: [{ waId: echo.to, phone: `+${echo.to}`, firstContactAt: echo.timestamp }] as never,
+    skipDuplicates: true,
+  });
+  const customer = await db.customer.findFirst({ where: { waId: echo.to } });
+  if (!customer) throw new Error(`Не удалось создать клиента ${echo.to}`);
+
+  let conversation = await db.conversation.findFirst({
+    where: { customerId: customer.id, status: { not: 'CLOSED' } },
+    orderBy: { lastMessageAt: 'desc' },
+  });
+  if (!conversation) {
+    conversation = await db.conversation.create({
+      data: { customerId: customer.id, phoneNumberId: number.id, mode: 'HUMAN' } as never,
+    });
+  }
+
+  try {
+    await db.message.create({
+      data: {
+        conversationId: conversation.id,
+        direction: 'OUTBOUND',
+        authorType: 'MANAGER',
+        type: echo.type.toUpperCase() as never,
+        text: echo.text ?? null,
+        mediaMimeType: echo.mediaMimeType ?? null,
+        providerMessageId: echo.providerMessageId,
+        status: 'SENT',
+        sentAt: echo.timestamp,
+        metadata: { source: 'phone', ...(echo.mediaId ? { mediaId: echo.mediaId } : {}) },
+      } as never,
+    });
+  } catch (error) {
+    if ((error as { code?: string }).code === 'P2002') return number.companyId;
+    throw error;
+  }
+
+  // Менеджер видел переписку на телефоне — непрочитанных больше нет.
+  await db.conversation.updateMany({
+    where: { id: conversation.id },
+    data: { lastMessageAt: echo.timestamp, unreadCount: 0, phoneNumberId: number.id },
+  });
+
+  // Ассистент уступает диалог. Пометка — только при переключении, не на
+  // каждое сообщение менеджера.
+  const { count } = await db.conversation.updateMany({
+    where: { id: conversation.id, mode: 'AI' },
+    data: { mode: 'HUMAN' },
+  });
+  if (count > 0) {
+    await db.message.create({
+      data: {
+        conversationId: conversation.id,
+        direction: 'OUTBOUND',
+        authorType: 'SYSTEM',
+        text: 'Менеджер ответил клиенту с телефона — ассистент в этом диалоге больше не отвечает. Вернуть его можно кнопкой «Вернуть ассистенту».',
+        status: 'SENT',
+        sentAt: new Date(),
+      } as never,
+    });
+  }
+
+  return number.companyId;
+}

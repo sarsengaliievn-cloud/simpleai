@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { parseMetaWebhook, parseMetaStatuses, verifyMetaSignature, CloudApiWhatsAppProvider, WhatsAppSendError } from '@wa/whatsapp';
+import { parseMetaWebhook, parseMetaStatuses, parseMetaEchoes, verifyMetaSignature, CloudApiWhatsAppProvider, WhatsAppSendError } from '@wa/whatsapp';
 import { chunkText } from './ai/chunk.js';
 import { normalizeHistory } from './ai/rag.js';
 import { buildSystemPrompt } from './ai/prompt.js';
@@ -194,5 +194,38 @@ describe('WhatsApp Cloud API', () => {
     });
     expect(parsed.map((m) => m.profileName)).toEqual(['Данияр', 'Айгерим']);
     expect(Number.isNaN(parsed[1]!.timestamp.getTime())).toBe(false);
+  });
+});
+
+describe('ответы менеджера с телефона (Coexistence)', () => {
+  const payload = {
+    object: 'whatsapp_business_account',
+    entry: [{
+      id: 'WABA',
+      changes: [{
+        field: 'smb_message_echoes',
+        value: {
+          messaging_product: 'whatsapp',
+          metadata: { display_phone_number: '77001181808', phone_number_id: 'PN1' },
+          message_echoes: [
+            { from: '77001181808', to: '77011234567', id: 'wamid.e1', timestamp: '1700000000', type: 'text', text: { body: 'Добрый день, есть 42 размер' } },
+            { from: '77001181808', to: '77011234567', id: 'wamid.e2', timestamp: '1700000005', type: 'image', image: { id: '123', mime_type: 'image/jpeg', caption: 'вот фото' } },
+          ],
+        },
+      }],
+    }],
+  };
+
+  it('разбирает текст и фото, номер клиента — из to', () => {
+    const echoes = parseMetaEchoes(payload);
+    expect(echoes).toHaveLength(2);
+    expect(echoes[0]).toMatchObject({ providerMessageId: 'wamid.e1', phoneNumberId: 'PN1', to: '77011234567', type: 'text', text: 'Добрый день, есть 42 размер' });
+    expect(echoes[1]).toMatchObject({ type: 'image', text: 'вот фото', mediaId: '123' });
+    expect(echoes[0]!.timestamp.getTime()).toBe(1700000000 * 1000);
+  });
+
+  it('эхо не считается сообщением клиента', () => {
+    expect(parseMetaWebhook(payload)).toHaveLength(0);
+    expect(parseMetaStatuses(payload)).toHaveLength(0);
   });
 });

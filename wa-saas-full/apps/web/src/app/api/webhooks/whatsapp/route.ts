@@ -58,7 +58,11 @@ export async function POST(request: Request) {
   const provider = getProvider();
   const messages = provider.parseWebhook(payload);
   const statuses = provider.parseStatuses(payload);
-  if (messages.length === 0 && statuses.length === 0) return new Response('ok', { status: 200 });
+  // Ответы менеджера из приложения WhatsApp Business на телефоне (Coexistence).
+  const echoes = provider.parseEchoes(payload);
+  if (messages.length === 0 && statuses.length === 0 && echoes.length === 0) {
+    return new Response('ok', { status: 200 });
+  }
 
   // Ключ дедупликации: Meta может прислать одно событие несколько раз.
   // У статуса ключ — id сообщения + сам статус: «доставлено» и «прочитано»
@@ -66,6 +70,7 @@ export async function POST(request: Request) {
   const keys = [
     ...messages.map((m) => m.providerMessageId),
     ...statuses.map((st) => `${st.providerMessageId}:${st.status}`),
+    ...echoes.map((e) => `${e.providerMessageId}:echo`),
   ].sort().join('|');
   const externalId = keys.length <= 200 ? keys : `sha256:${createHash('sha256').update(keys).digest('hex')}`;
 
