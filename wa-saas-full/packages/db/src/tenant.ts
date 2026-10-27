@@ -19,6 +19,9 @@ export const TENANT_MODELS = new Set([
   'PipelineStage',
   'Deal',
   'DealEvent',
+  'AiUsage',
+  'BalanceTransaction',
+  'TopupRequest',
 ]);
 
 /**

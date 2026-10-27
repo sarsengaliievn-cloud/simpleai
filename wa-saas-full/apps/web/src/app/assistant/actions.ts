@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireCompany } from '@/lib/session';
-import { TIME_RE } from '@wa/core';
+import { TIME_RE, MODELS, providerAvailable, embedFamily, resolveAI } from '@wa/core';
+import { ingestQueue, JOB_CLEANUP } from '@/lib/queue';
 
 const TONES = ['Дружелюбный', 'Профессиональный', 'Короткий', 'Подробный', 'Формальный'];
 const LANGS = ['ru', 'kk', 'en'];
@@ -79,4 +80,38 @@ export async function saveAssistant(formData: FormData): Promise<void> {
   revalidatePath('/assistant');
   revalidatePath('/playground');
   redirect('/assistant?saved=1');
+}
+
+/**
+ * Выбор ИИ компании. Если сменилось семейство (Gemini ↔ ChatGPT), база
+ * знаний сразу ставится на пересчёт — иначе бот перестал бы находить ответы.
+ */
+export async function saveModelAction(provider: string, model: string): Promise<{ ok: boolean; error?: string; reindexed?: number }> {
+  const { db, user, company } = await requireCompany('ai:manage');
+  const info = MODELS.find((m) => m.id === model && m.provider === provider);
+  if (!info) return { ok: false, error: 'Такой модели нет в списке' };
+  if (!providerAvailable(info.provider)) return { ok: false, error: 'Эта модель пока недоступна на платформе' };
+
+  const config = await db.aIConfiguration.findFirst();
+  if (!config) return { ok: false, error: 'Сначала сохраните настройки ассистента' };
+  const before = embedFamily(resolveAI(config));
+  await db.aIConfiguration.updateMany({ where: { id: config.id }, data: { aiProvider: info.provider, aiModel: info.id } });
+  const after = embedFamily(resolveAI({ aiProvider: info.provider, aiModel: info.id }));
+
+  let reindexed = 0;
+  if (before !== after) {
+    const docs = await db.knowledgeDocument.findMany({ where: { status: { in: ['READY', 'FAILED'] }, chunkCount: { gt: 0 } }, select: { id: true } });
+    for (const doc of docs) {
+      await db.knowledgeDocument.updateMany({ where: { id: doc.id }, data: { status: 'PENDING' } });
+      await ingestQueue.add('reembed', { companyId: company.id, documentId: doc.id, text: '', reembed: true }, { attempts: 3, backoff: { type: 'exponential', delay: 5000 }, ...JOB_CLEANUP });
+    }
+    reindexed = docs.length;
+  }
+
+  await db.auditLog.create({
+    data: { actorUserId: user.id, action: 'ai.model.changed', entityType: 'AIConfiguration', entityId: config.id, metadata: { provider: info.provider, model: info.id } } as never,
+  });
+  revalidatePath('/assistant');
+  revalidatePath('/knowledge');
+  return { ok: true, reindexed };
 }

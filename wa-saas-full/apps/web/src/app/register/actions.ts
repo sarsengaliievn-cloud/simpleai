@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
 import { prisma, DEFAULT_STAGES } from '@wa/db';
+import { billingSettings, creditBalance } from '@wa/core';
 import { hashPassword, createSession } from '@/lib/auth';
 
 function slugify(name: string) {
@@ -60,8 +61,9 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
   // Пользователь, компания, членство и настройки ассистента создаются
   // одной транзакцией: половинчатая регистрация хуже, чем никакой.
   let userId: string;
+  let companyId: string;
   try {
-    userId = await prisma.$transaction(async (tx) => {
+    [userId, companyId] = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
           email: values.email,
@@ -99,7 +101,7 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
         data: { companyId: company.id, actorUserId: created.id, action: 'company.created' },
       });
 
-      return created.id;
+      return [created.id, company.id] as const;
     });
   } catch (error) {
     // Две одновременные регистрации на одну почту: проверку выше прошли
@@ -109,6 +111,12 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
     }
     console.error('[register] сбой', error);
     return fail('Не удалось создать аккаунт. Попробуйте ещё раз.');
+  }
+
+  // Бонус на пробу: новая компания может сразу проверить бота.
+  const { welcomeBonusKzt } = await billingSettings();
+  if (welcomeBonusKzt > 0) {
+    await creditBalance(companyId, { kind: 'bonus', amountTiyn: Math.round(welcomeBonusKzt * 100), note: 'Бонус на пробу' });
   }
 
   const h = await headers();

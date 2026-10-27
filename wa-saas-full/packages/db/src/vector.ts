@@ -31,6 +31,15 @@ export async function insertChunks(
   return inserted;
 }
 
+/** Новый вектор для готового фрагмента — при смене провайдера эмбеддингов. */
+export async function updateChunkEmbedding(companyId: string, chunkId: string, embedding: number[]) {
+  const literal = `[${embedding.join(',')}]`;
+  await prisma.$executeRaw`
+    UPDATE knowledge_chunks SET embedding = ${literal}::vector
+    WHERE id = ${chunkId}::uuid AND "companyId" = ${companyId}::uuid
+  `;
+}
+
 export type SearchHit = {
   chunkId: string;
   documentId: string;

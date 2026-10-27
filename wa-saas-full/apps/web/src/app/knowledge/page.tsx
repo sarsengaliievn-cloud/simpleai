@@ -1,8 +1,11 @@
 import { requireCompany } from '@/lib/session';
 import { Sidebar } from '@/components/Sidebar';
+import { isSuperAdmin } from '@/lib/admin';
 import { KnowledgeUpload } from '@/components/KnowledgeUpload';
 import { KnowledgeSearch } from '@/components/KnowledgeSearch';
 import { AutoRefresh } from '@/components/AutoRefresh';
+import { embedFamily, resolveAI } from '@wa/core';
+import { ReindexBanner } from '@/components/ReindexBanner';
 import { removeDocument } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -20,10 +23,13 @@ export default async function KnowledgePage() {
   const docs = await db.knowledgeDocument.findMany({ orderBy: { createdAt: 'desc' }, take: 100 });
   const chunks = docs.reduce((sum, d) => sum + d.chunkCount, 0);
   const indexing = docs.some((d) => d.status === 'PENDING' || d.status === 'PROCESSING');
+  // Индекс построен другим AI-провайдером — поиск по нему вернёт мусор.
+  const family = embedFamily(resolveAI(await db.aIConfiguration.findFirst()));
+  const stale = docs.filter((d) => d.status === 'READY' && d.embedProvider && d.embedProvider !== family).length;
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} />
       <div className="main">
         <AutoRefresh active={indexing} />
         <header className="top">
@@ -34,6 +40,7 @@ export default async function KnowledgePage() {
         </header>
 
         <div className="page">
+          {stale > 0 && <ReindexBanner count={stale} provider={family === 'openai' ? 'ChatGPT (OpenAI)' : 'Gemini'} />}
           <div className="grid" style={{ gridTemplateColumns: '1.4fr 1fr' }}>
             <div>
               <KnowledgeUpload />

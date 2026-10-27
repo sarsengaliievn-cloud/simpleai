@@ -1,8 +1,7 @@
-import { MAX_AUDIO_BYTES, TRANSCRIBE_PROMPT, type AIProvider, type GenerateOptions, type GenerateResult } from './provider.js';
+import type { AIProvider, GenerateOptions, GenerateResult } from './provider.js';
+import { openaiEmbed, openaiTranscribe } from './openai.js';
 
 const API = 'https://api.anthropic.com/v1/messages';
-const EMBED_API = 'https://api.openai.com/v1/embeddings';
-const TRANSCRIBE_API = 'https://api.openai.com/v1/audio/transcriptions';
 
 /**
  * Генерация — Anthropic, эмбеддинги — OpenAI: у Anthropic своего эмбеддера нет.
@@ -53,44 +52,12 @@ export class AnthropicProvider implements AIProvider {
     };
   }
 
-  async embed(texts: string[]): Promise<number[][]> {
-    if (!this.embedKey) throw new Error('OPENAI_API_KEY не задан (нужен для эмбеддингов)');
-
-    const response = await fetch(EMBED_API, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.embedKey}` },
-      body: JSON.stringify({ model: 'text-embedding-3-small', input: texts }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Эмбеддинги вернули ${response.status}: ${(await response.text()).slice(0, 300)}`);
-    }
-
-    const data = (await response.json()) as { data: Array<{ embedding: number[]; index: number }> };
-    return data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
+  embed(texts: string[]): Promise<number[][]> {
+    return openaiEmbed(this.embedKey, texts);
   }
 
   /** Anthropic аудио не принимает — расшифровку делает OpenAI тем же ключом, что и эмбеддинги. */
-  async transcribe(audio: Buffer, mimeType: string): Promise<string> {
-    if (!this.embedKey) throw new Error('OPENAI_API_KEY не задан (нужен для расшифровки голосовых)');
-    if (audio.length > MAX_AUDIO_BYTES) throw new Error('Голосовое слишком большое для расшифровки');
-
-    const type = mimeType.split(';')[0]!.trim() || 'audio/ogg';
-    const form = new FormData();
-    form.append('file', new Blob([new Uint8Array(audio)], { type }), `voice.${type.split('/')[1] ?? 'ogg'}`);
-    form.append('model', process.env.AI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe');
-    form.append('prompt', TRANSCRIBE_PROMPT);
-
-    const response = await fetch(TRANSCRIBE_API, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${this.embedKey}` },
-      body: form,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Расшифровка вернула ${response.status}: ${(await response.text()).slice(0, 300)}`);
-    }
-    const data = (await response.json()) as { text?: string };
-    return (data.text ?? '').trim();
+  transcribe(audio: Buffer, mimeType: string): Promise<string> {
+    return openaiTranscribe(this.embedKey, audio, mimeType);
   }
 }

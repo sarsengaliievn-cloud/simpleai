@@ -12,6 +12,8 @@ type Turn = {
   sources?: string[];
   /** Ответ, разбитый так же, как он ушёл бы клиенту в WhatsApp. */
   parts?: string[];
+  /** Сколько стоил ответ, «1,24 ₸». */
+  cost?: string;
 };
 
 export function Playground({ tone, threshold, documents }: { tone: string; threshold: number; documents: number }) {
@@ -46,6 +48,7 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
               content: json.answer || 'В базе знаний нет ответа на этот вопрос — передал бы менеджеру.',
               service: !json.answer || json.needsHuman,
               confidence: json.confidence,
+              cost: json.cost,
               needsHuman: json.needsHuman,
               parts: Array.isArray(json.parts) && json.answer && !json.needsHuman ? json.parts : undefined,
               sources: [...new Set<string>(json.hits?.slice(0, 3).map((h: { title: string }) => h.title) ?? [])].slice(0, 2),
@@ -99,6 +102,7 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
                   уверенность {t.confidence}%
                   {t.needsHuman ? ' · ушло бы менеджеру' : ''}
                   {t.sources?.length ? ` · ${t.sources.join(', ')}` : ''}
+                  {t.cost ? ` · ${t.cost}` : ''}
                 </div>
               )}
             </div>

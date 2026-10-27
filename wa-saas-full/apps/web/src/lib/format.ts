@@ -65,3 +65,14 @@ export function agoText(date: Date) {
   const t = timeAgo(date);
   return t === 'только что' || t === 'вчера' ? t : `${t} назад`;
 }
+
+/** Тиыны → «1 234 ₸» / «0,94 ₸». Дублирует core для браузера. */
+export function tiyn(value: number) {
+  const kzt = value / 100;
+  const abs = Math.abs(kzt);
+  const text = new Intl.NumberFormat('ru-RU', {
+    minimumFractionDigits: abs < 100 && abs % 1 !== 0 ? 2 : 0,
+    maximumFractionDigits: abs < 100 ? 2 : 0,
+  }).format(kzt).replace(/[  ]/g, ' ');
+  return `${text} ₸`;
+}

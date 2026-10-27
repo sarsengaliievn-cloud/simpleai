@@ -1,13 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import { tiyn } from '@/lib/format';
 
 /**
  * Столбики по дням: один ряд, одна ось от нуля. Подсказка с датой и числом
  * — при наведении и при фокусе с клавиатуры; под графиком — первый, средний
  * и последний день, без подписи на каждом столбике.
  */
-export function DayBars({ data, unit }: { data: Array<{ label: string; value: number }>; unit: string }) {
+export function DayBars({ data, unit, money = false }: { data: Array<{ label: string; value: number }>; unit: string; /** Значения — тиыны, показывать в тенге. */ money?: boolean }) {
+  const fmt = (v: number) => (money ? tiyn(v) : String(v));
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...data.map((d) => d.value));
   const total = data.reduce((s, d) => s + d.value, 0);
@@ -16,7 +18,7 @@ export function DayBars({ data, unit }: { data: Array<{ label: string; value: nu
   return (
     <div className="daybars">
       <div className="daybars-head">
-        <span className="daybars-total">{shown ? shown.value : total}</span>
+        <span className="daybars-total">{fmt(shown ? shown.value : total)}</span>
         <span className="tiny muted">{shown ? `${unit}, ${shown.label}` : `${unit} за период`}</span>
       </div>
       <div className="daybars-plot" onMouseLeave={() => setHover(null)} role="list">
@@ -25,7 +27,7 @@ export function DayBars({ data, unit }: { data: Array<{ label: string; value: nu
             key={i}
             role="listitem"
             tabIndex={0}
-            aria-label={`${d.label}: ${d.value}`}
+            aria-label={`${d.label}: ${fmt(d.value)}`}
             className={`daybars-col ${hover === i ? 'on' : ''}`}
             onMouseEnter={() => setHover(i)}
             onFocus={() => setHover(i)}

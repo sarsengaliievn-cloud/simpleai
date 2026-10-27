@@ -28,4 +28,6 @@ export interface IngestDocumentJob {
   companyId: string;
   documentId: string;
   text: string;
+  /** Пересчитать эмбеддинги готовых фрагментов (сменили AI-провайдера). Текст не нужен. */
+  reembed?: boolean;
 }

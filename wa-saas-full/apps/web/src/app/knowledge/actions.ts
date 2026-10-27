@@ -90,3 +90,25 @@ export async function removeDocument(documentId: string) {
   await db.knowledgeDocument.deleteMany({ where: { id: documentId } });
   revalidatePath('/knowledge');
 }
+
+/**
+ * Сменили AI-провайдера (например, Gemini → ChatGPT): пересчитать векторы
+ * всех готовых документов. Текст уже лежит в базе — заново загружать ничего не нужно.
+ */
+export async function reindexAll() {
+  const { company, db } = await requireCompany('knowledge:manage');
+  const docs = await db.knowledgeDocument.findMany({
+    where: { status: { in: ['READY', 'FAILED'] }, chunkCount: { gt: 0 } },
+    select: { id: true },
+  });
+  for (const doc of docs) {
+    await db.knowledgeDocument.updateMany({ where: { id: doc.id }, data: { status: 'PENDING' } });
+    await ingestQueue.add(
+      'reembed',
+      { companyId: company.id, documentId: doc.id, text: '', reembed: true },
+      { attempts: 3, backoff: { type: 'exponential', delay: 5000 }, ...JOB_CLEANUP },
+    );
+  }
+  revalidatePath('/knowledge');
+  return { ok: true as const, count: docs.length };
+}

@@ -1,7 +1,9 @@
 export * from './provider.js';
 export { AnthropicProvider } from './anthropic.js';
 export { GeminiProvider } from './gemini.js';
-export { getAI } from './factory.js';
+export { getAI, getAIFor, resolveAI, serverDefault, defaultModelFor, embedFamily, aiLabel, billingProvider } from './factory.js';
+export type { AIChoice } from './factory.js';
+export { OpenAIProvider, responsesText } from './openai.js';
 export { transcribeAudio } from './transcribe.js';
 export { chunkText, estimateTokens } from './chunk.js';
 export { buildSystemPrompt } from './prompt.js';

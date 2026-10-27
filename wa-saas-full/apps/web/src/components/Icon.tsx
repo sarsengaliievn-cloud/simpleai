@@ -17,6 +17,7 @@ const PATHS = {
   bag: 'M4.5 6.5h11l-.8 10H5.3l-.8-10ZM7.5 8V5.5a2.5 2.5 0 0 1 5 0V8',
   user: 'M10 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM4.5 16.5c.5-3 2.6-4.7 5.5-4.7s5 1.7 5.5 4.7',
   x: 'M6 6l8 8M14 6l-8 8',
+  wallet: 'M3.5 6.5a2 2 0 0 1 2-2h9v2M3.5 6.5v8a2 2 0 0 0 2 2h11v-10h-11a2 2 0 0 1-2-2ZM13.5 11.5h.01',
 } as const;
 
 export type IconName = keyof typeof PATHS;

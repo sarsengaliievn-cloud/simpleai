@@ -1,5 +1,5 @@
 import { requireCompany } from '@/lib/session';
-import { answerQuestion, splitReply } from '@wa/core';
+import { answerQuestion, splitReply, hasBalance, recordUsage, billingProvider, formatTiyn } from '@wa/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +39,10 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Ассистент ещё не настроен — откройте раздел «Ассистент».' }, { status: 400 });
   }
 
+  if (!(await hasBalance(company.id))) {
+    return Response.json({ error: 'Баланс ИИ закончился — пополните его в разделе «Баланс».' }, { status: 402 });
+  }
+
   try {
     const result = await answerQuestion({
       companyId: company.id,
@@ -48,8 +52,16 @@ export async function POST(request: Request) {
       history,
     });
 
+    const charged = await recordUsage(company.id, 'playground', {
+      provider: billingProvider(result.ai),
+      model: result.ai.model,
+      ...result.usage,
+    });
+
     return Response.json({
       answer: result.answer,
+      /** Сколько стоил этот ответ — видно в тестовом чате. */
+      cost: formatTiyn(charged),
       // Как ответ уйдёт в WhatsApp — тестовый чат показывает те же части.
       parts: config.splitReplies && result.answer ? splitReply(result.answer, config.splitMaxChars) : [result.answer],
       confidence: result.confidence,

@@ -158,6 +158,54 @@ docker compose -f docker-compose.prod.yml logs -f --tail 100 web worker
 **Состояние:** `docker compose -f docker-compose.prod.yml ps`
 **Перезапуск:** `docker compose -f docker-compose.prod.yml --env-file .env.production restart web worker`
 
+## Ассистент на ChatGPT (OpenAI) вместо Gemini
+
+Нужен ключ OpenAI (platform.openai.com → API keys) с пополненным балансом. На сервере:
+
+```bash
+cd /opt/saudabot/wa-saas-full
+sed -i 's/^AI_PROVIDER=.*/AI_PROVIDER="openai"/' .env.production
+read -s -p "Ключ OpenAI: " K; echo; sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=\"$K\"|" .env.production; unset K
+bash deploy/update.sh
+```
+
+Модель по умолчанию — `gpt-5-mini`. Другая: строка `OPENAI_MODEL="…"` в `.env.production`.
+
+После переключения: панель → **База знаний** → **«Обновить индекс»** (появится жёлтая
+плашка). Документы заново загружать не нужно. Пока индекс не обновлён, бот не находит
+ответы в базе знаний и зовёт менеджера.
+
+Вернуться на Gemini — то же самое с `AI_PROVIDER="gemini"` и снова «Обновить индекс».
+
+Если в `.env.production` есть оба ключа (`GEMINI_API_KEY` и `OPENAI_API_KEY`), каждая
+компания сама выбирает модель в **«Как отвечает» → «Модель ИИ»**; `AI_PROVIDER` — только
+выбор по умолчанию для новых компаний. Индекс при смене модели пересчитывается сам.
+
+## Баланс ИИ и админка платформы
+
+Каждый ответ бота списывается с баланса компании: себестоимость модели × курс × наценка
+(по умолчанию 520 ₸ за $ и ×2). Баланс ноль — бот не отвечает, все новые диалоги уходят
+менеджерам. Новая компания получает 1 000 ₸ на пробу, существующим при обновлении
+зачислено 5 000 ₸.
+
+Админка всех компаний — `https://app.saudabot.kz/admin`. Открывается только почтам из
+`SUPER_ADMIN_EMAILS` (остальным — «страница не найдена»). Один раз на сервере, вписав почту,
+с которой входите в панель:
+
+```bash
+cd /opt/saudabot/wa-saas-full
+grep -q '^SUPER_ADMIN_EMAILS=' .env.production || echo 'SUPER_ADMIN_EMAILS=""' >> .env.production
+sed -i 's|^SUPER_ADMIN_EMAILS=.*|SUPER_ADMIN_EMAILS="ваша@почта"|' .env.production
+bash deploy/update.sh
+```
+
+Как это работает:
+1. Клиент платит вам (Kaspi/счёт) и в разделе **«Баланс ИИ»** нажимает «Запросить пополнение».
+2. В `/admin` → «Заявки на пополнение» проверяете оплату и жмёте «Зачислить» — сумма сразу на балансе.
+3. Без заявки: в таблице компаний — «Пополнение», «Бонус» или «Корректировка ±» (минус — списать).
+4. Внизу `/admin` — курс доллара, наценка, бонус новым компаниям, текст «как оплатить» и
+   себестоимость моделей. Новые цены действуют в течение минуты.
+
 ## Бэкапы
 
 Копия базы делается раз в сутки в `/opt/saudabot/wa-saas-full/backups/`

@@ -1,5 +1,8 @@
+import { aiLabel, resolveAI, MODELS, providerAvailable, billingSettings, costUsd, chargeTiyn, formatTiyn } from '@wa/core';
+import { ModelPicker, type ModelOption } from '@/components/ModelPicker';
 import { requireCompany } from '@/lib/session';
 import { Sidebar } from '@/components/Sidebar';
+import { isSuperAdmin } from '@/lib/admin';
 import { buildSystemPrompt } from '@wa/core';
 import { saveAssistant } from './actions';
 
@@ -26,14 +29,30 @@ export default async function AssistantPage({ searchParams }: Props) {
   };
 
   const preview = buildSystemPrompt(config, company);
+  const choice = resolveAI('aiProvider' in config ? config : null);
+  const ai = aiLabel(choice);
+
+  // Примерная цена ответа: инструкция и найденные фрагменты ~2500 токенов, ответ ~250.
+  const settings = await billingSettings();
+  const options: ModelOption[] = MODELS.map((m) => ({
+    id: m.id,
+    provider: m.provider,
+    label: m.label,
+    note: m.note,
+    available: providerAvailable(m.provider),
+    price: `≈ ${formatTiyn(chargeTiyn(costUsd({ provider: m.provider, model: m.id, inputTokens: 2500, outputTokens: 250, embedTokens: 40 }, settings), settings))} за ответ`,
+  }));
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} />
       <div className="main">
         <header className="top">
           <div className="top-t"><h1>Как отвечает ассистент</h1><p className="top-hint">Как бот разговаривает с клиентами: тон, правила, рабочие часы</p></div>
-          <span className={`chip ${config.enabled ? 'chip-ok' : ''}`} style={{ marginLeft: 'auto', flex: 'none' }}>
+          <span className="chip" style={{ marginLeft: 'auto', flex: 'none' }} title={`Модель: ${ai.model}`}>
+            {ai.provider} · {ai.model}
+          </span>
+          <span className={`chip ${config.enabled ? 'chip-ok' : ''}`} style={{ flex: 'none' }}>
             <span className="dot" />{config.enabled ? 'Отвечает клиентам' : 'Выключен'}
           </span>
         </header>
@@ -44,6 +63,8 @@ export default async function AssistantPage({ searchParams }: Props) {
               Настройки сохранены — ассистент уже работает по ним.
             </div>
           )}
+          <ModelPicker options={options} current={{ provider: choice.provider, model: choice.model }} />
+
           <form action={saveAssistant}>
             <div className="card card-p" style={{ marginBottom: 16 }}>
               <label className="row" style={{ justifyContent: 'space-between' }}>

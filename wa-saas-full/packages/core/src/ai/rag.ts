@@ -1,5 +1,6 @@
 import { searchChunks, type SearchHit } from '@wa/db';
-import { getAI } from './factory.js';
+import { getAIFor, resolveAI, type AIChoice } from './factory.js';
+import { estimateTokens } from './chunk.js';
 import { buildSystemPrompt, type AIConfigLike } from './prompt.js';
 import type { ChatMessage } from './provider.js';
 
@@ -11,7 +12,10 @@ export type AnswerResult = {
   topScore: number;
   needsHuman: boolean;
   hits: SearchHit[];
-  usage: { inputTokens: number; outputTokens: number };
+  /** Расход для баланса: генерация и эмбеддинг вопроса. */
+  usage: { inputTokens: number; outputTokens: number; embedTokens: number };
+  /** Каким ИИ отвечали — для списания по цене модели. */
+  ai: AIChoice;
 };
 
 /** Ниже этого совпадения считаем, что в базе знаний ответа просто нет. */
@@ -20,11 +24,13 @@ const MIN_RELEVANCE = 0.35;
 export async function answerQuestion(params: {
   companyId: string;
   company: { name: string; description?: string | null; city?: string | null };
-  config: AIConfigLike & { confidenceThreshold: number };
+  config: AIConfigLike & { confidenceThreshold: number; aiProvider?: string | null; aiModel?: string | null };
   question: string;
   history?: ChatMessage[];
 }): Promise<AnswerResult> {
-  const ai = getAI();
+  const choice = resolveAI(params.config);
+  const ai = getAIFor(choice);
+  const embedTokens = estimateTokens(params.question);
 
   const [embedding] = await ai.embed([params.question]);
   const hits = embedding ? await searchChunks(params.companyId, embedding, 5) : [];
@@ -40,7 +46,8 @@ export async function answerQuestion(params: {
       topScore,
       needsHuman: true,
       hits,
-      usage: { inputTokens: 0, outputTokens: 0 },
+      usage: { inputTokens: 0, outputTokens: 0, embedTokens },
+      ai: choice,
     };
   }
 
@@ -69,7 +76,8 @@ export async function answerQuestion(params: {
     topScore,
     needsHuman: parsed.needsHuman || confidence < params.config.confidenceThreshold,
     hits,
-    usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
+    usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, embedTokens },
+    ai: choice,
   };
 }
 

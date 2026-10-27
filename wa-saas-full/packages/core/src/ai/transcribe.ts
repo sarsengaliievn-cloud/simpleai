@@ -1,6 +1,6 @@
-import { getAI } from './factory.js';
+import { getAI, getAIFor, type AIChoice } from './factory.js';
 
-/** Расшифровка голосового текущим AI-провайдером (AI_PROVIDER). */
-export async function transcribeAudio(audio: Buffer, mimeType: string): Promise<string> {
-  return getAI().transcribe(audio, mimeType);
+/** Расшифровка голосового ИИ компании (или сервера по умолчанию). */
+export async function transcribeAudio(audio: Buffer, mimeType: string, choice?: AIChoice): Promise<string> {
+  return (choice ? getAIFor(choice) : getAI()).transcribe(audio, mimeType);
 }

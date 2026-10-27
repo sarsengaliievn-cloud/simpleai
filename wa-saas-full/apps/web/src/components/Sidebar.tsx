@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { logout } from '@/app/login/actions';
 import { Icon, type IconName } from './Icon';
+import { tiyn } from '@/lib/format';
 
 type Role = 'OWNER' | 'ADMIN' | 'MANAGER' | 'OPERATOR' | 'ANALYST';
 
@@ -33,6 +34,7 @@ const NAV: Array<{ group: string; items: Array<{ href: string; label: string; ic
   {
     group: 'Компания',
     items: [
+      { href: '/billing', label: 'Баланс ИИ', icon: 'wallet', roles: ADMINS },
       { href: '/whatsapp', label: 'WhatsApp', icon: 'phone', roles: ADMINS },
       { href: '/team', label: 'Команда', icon: 'team', roles: ADMINS },
       { href: '/settings', label: 'Настройки', icon: 'gear', roles: ADMINS },
@@ -48,13 +50,22 @@ export function Sidebar({
   companyName,
   userName,
   role = 'OWNER',
+  balance,
+  superAdmin = false,
 }: {
   companyName: string;
   userName?: string;
   role?: Role;
+  /** Баланс ИИ компании — показываем владельцу и администратору. */
+  balance?: { tiyn: number; lastTopup: number };
+  /** Владелец платформы — видит ссылку на админку всех компаний. */
+  superAdmin?: boolean;
 }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
+  const showBalance = balance && ADMINS.includes(role);
+  const empty = showBalance && balance.tiyn <= 0;
+  const low = showBalance && !empty && balance.lastTopup > 0 && balance.tiyn < balance.lastTopup * 0.1;
 
   // На телефоне меню закрывается при переходе на другую страницу.
   useEffect(() => setOpen(false), [path]);
@@ -96,12 +107,30 @@ export function Sidebar({
                   >
                     <Icon name={item.icon} />
                     <span>{item.label}</span>
+                    {item.href === '/billing' && showBalance && (
+                      <span className={`nav-amount ${empty ? 'bad' : low ? 'warn' : ''}`}>{tiyn(balance.tiyn)}</span>
+                    )}
                   </Link>
                 ))}
               </div>
             );
           })}
+          {superAdmin && (
+            <div className="nav-section">
+              <div className="nav-group">Платформа</div>
+              <Link href="/admin" className={`nav-i ${path.startsWith('/admin') ? 'on' : ''}`}>
+                <Icon name="gear" />
+                <span>Все компании</span>
+              </Link>
+            </div>
+          )}
         </nav>
+
+        {(empty || low) && !path.startsWith('/billing') && (
+          <Link href="/billing" className={`side-alert ${empty ? 'bad' : ''}`}>
+            {empty ? 'Баланс ИИ закончился — бот не отвечает клиентам. Пополнить' : `Баланс ИИ на исходе: ${tiyn(balance!.tiyn)}. Пополнить`}
+          </Link>
+        )}
 
         <div className="side-user">
           <div style={{ minWidth: 0 }}>

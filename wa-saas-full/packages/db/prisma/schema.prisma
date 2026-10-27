@@ -90,6 +90,10 @@ model Company {
   website     String?
   description String?
   timezone    String   @default("Asia/Almaty")
+  /// Баланс ИИ в тиынах (1 ₸ = 100). Каждый ответ бота списывает стоимость.
+  balanceTiyn   Int    @default(0)
+  /// Последнее пополнение — от него считается «осталось меньше 10%».
+  lastTopupTiyn Int    @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -107,6 +111,9 @@ model Company {
   pipelineStages     PipelineStage[]
   deals              Deal[]
   dealEvents         DealEvent[]
+  aiUsage            AiUsage[]
+  balanceTransactions BalanceTransaction[]
+  topupRequests      TopupRequest[]
 
   @@map("companies")
 }
@@ -401,6 +408,10 @@ model AIConfiguration {
   advancedMode   Boolean @default(false)
   advancedPrompt String  @default("")
 
+  /// ИИ компании: gemini | openai. Пусто — по умолчанию сервера.
+  aiProvider     String?
+  aiModel        String?
+
   // ── Автоматизация ──────────────────────────
   /// Буферизация: сколько секунд ждать, пока клиент допишет серию
   /// сообщений, прежде чем ответить на всё сразу. 0 — отвечать сразу.
@@ -439,6 +450,9 @@ model KnowledgeDocument {
   status    IngestStatus   @default(PENDING)
   error     String?
   chunkCount Int           @default(0)
+  /// Чьими эмбеддингами построен индекс: gemini | openai. Сменили
+  /// провайдера — индекс нужно обновить, иначе поиск вернёт мусор.
+  embedProvider String?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
@@ -569,4 +583,79 @@ model DealEvent {
 
   @@index([companyId, dealId, createdAt])
   @@map("deal_events")
+}
+
+// ─────────────────────────────────────────────
+// Баланс ИИ
+// ─────────────────────────────────────────────
+
+/// Один вызов ИИ: что, на какой модели, сколько стоило нам и сколько списано.
+model AiUsage {
+  id             String   @id @default(uuid()) @db.Uuid
+  companyId      String   @db.Uuid
+  /// reply | playground | knowledge | voice
+  kind           String
+  provider       String
+  model          String
+  inputTokens    Int      @default(0)
+  outputTokens   Int      @default(0)
+  embedTokens    Int      @default(0)
+  audioSeconds   Int      @default(0)
+  /// Себестоимость в микродолларах (1 $ = 1 000 000).
+  costMicroUsd   Int      @default(0)
+  /// Списано с клиента, тиыны.
+  chargeTiyn     Int      @default(0)
+  conversationId String?  @db.Uuid
+  createdAt      DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@map("ai_usage")
+}
+
+/// Движение баланса, кроме списаний за ИИ: пополнение, бонус, корректировка.
+model BalanceTransaction {
+  id               String   @id @default(uuid()) @db.Uuid
+  companyId        String   @db.Uuid
+  /// topup | bonus | adjust
+  kind             String
+  amountTiyn       Int
+  balanceAfterTiyn Int
+  note             String?
+  actorEmail       String?
+  createdAt        DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@map("balance_transactions")
+}
+
+/// Клиент просит пополнить баланс — владелец платформы видит заявку в админке.
+model TopupRequest {
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @db.Uuid
+  amountTiyn  Int
+  comment     String?
+  /// open | done | rejected
+  status      String    @default("open")
+  requestedBy String?   @db.Uuid
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([status, createdAt])
+  @@map("topup_requests")
+}
+
+/// Настройки платформы (курс, наценка, цены моделей). Общие, без компании.
+model PlatformSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("platform_settings")
 }

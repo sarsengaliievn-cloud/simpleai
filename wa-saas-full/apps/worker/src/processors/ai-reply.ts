@@ -7,6 +7,12 @@ import {
   typingDelayMs,
   decryptSecret,
   transcribeAudio,
+  hasBalance,
+  recordUsage,
+  resolveAI,
+  billingProvider,
+  estimateAudioSeconds,
+  type AIChoice,
   sendWhatsAppText,
   markWhatsAppRead,
   sendErrorText,
@@ -68,12 +74,21 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     return;
   }
 
+  // ── Баланс ИИ ──────────────────────────────
+  // Денег нет — бот не отвечает, клиент уходит к людям. Пометка одна на диалог.
+  if (!(await hasBalance(companyId))) {
+    await handOff(db, conversationId, 'Баланс ИИ закончился — бот передал диалог менеджеру. Пополните баланс в разделе «Баланс».', { billing: 'empty' });
+    console.log(`[ai] ${conversationId}: баланс ИИ исчерпан — передано менеджеру`);
+    return;
+  }
+  const choice = resolveAI(config);
+
   // ── Голосовые → текст ──────────────────────
   for (const message of tail) {
     if (message.type !== 'AUDIO' || message.text) continue;
     const meta = (message.metadata ?? {}) as { mediaId?: string; transcribed?: boolean };
     if (!config.transcribeVoice || !meta.mediaId || meta.transcribed === false) continue;
-    message.text = await transcribeVoice(db, message.id, meta.mediaId, conversation.phoneNumber?.account.accessToken);
+    message.text = await transcribeVoice(db, message.id, meta.mediaId, conversation.phoneNumber?.account.accessToken, { companyId, conversationId, choice });
   }
 
   // ── Вложения, которых ассистент не понимает ─
@@ -97,6 +112,12 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     .map((m) => ({ role: m.direction === 'INBOUND' ? ('user' as const) : ('assistant' as const), content: m.text! }));
 
   const result = await answerQuestion({ companyId, company, config, question, history });
+  // Списание за ответ — даже если бот в итоге позвал менеджера: модель отработала.
+  await recordUsage(companyId, 'reply', {
+    provider: billingProvider(result.ai),
+    model: result.ai.model,
+    ...result.usage,
+  }, conversationId);
 
   if (result.needsHuman || !result.answer) {
     await handOff(
@@ -261,6 +282,7 @@ async function transcribeVoice(
   messageId: string,
   mediaId: string,
   encryptedToken: string | undefined,
+  bill: { companyId: string; conversationId: string; choice: AIChoice },
 ): Promise<string | null> {
   let accessToken: string | null = null;
   try {
@@ -271,7 +293,12 @@ async function transcribeVoice(
 
   try {
     const media = await getProvider().downloadMedia({ mediaId, accessToken });
-    const text = (await transcribeAudio(media.data, media.mimeType)).slice(0, 4000);
+    const text = (await transcribeAudio(media.data, media.mimeType, bill.choice)).slice(0, 4000);
+    await recordUsage(bill.companyId, 'voice', {
+      provider: billingProvider(bill.choice),
+      model: bill.choice.model,
+      audioSeconds: estimateAudioSeconds(media.data.length),
+    }, bill.conversationId);
     await db.message.updateMany({
       where: { id: messageId },
       data: {

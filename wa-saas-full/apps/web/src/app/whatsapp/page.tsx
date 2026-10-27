@@ -1,5 +1,6 @@
 import { requireCompany } from '@/lib/session';
 import { Sidebar } from '@/components/Sidebar';
+import { isSuperAdmin } from '@/lib/admin';
 import { ConnectSection } from '@/components/ConnectSection';
 import { disconnectNumber } from './actions';
 import { timeAgo, agoText } from '@/lib/format';
@@ -29,7 +30,7 @@ export default async function WhatsAppPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} />
       <div className="main">
         <header className="top">
           <div className="top-t"><h1>WhatsApp</h1><p className="top-hint">Номера, на которые пишут клиенты</p></div>

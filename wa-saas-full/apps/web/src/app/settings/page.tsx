@@ -1,5 +1,6 @@
 import { requireCompany } from '@/lib/session';
 import { Sidebar } from '@/components/Sidebar';
+import { isSuperAdmin } from '@/lib/admin';
 import { saveCompany } from './actions';
 import { timeAgo, agoText } from '@/lib/format';
 
@@ -19,7 +20,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} />
       <div className="main">
         <header className="top"><div className="top-t"><h1>Настройки</h1><p className="top-hint">Данные компании и журнал изменений</p></div></header>
 
