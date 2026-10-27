@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
-import { prisma } from '@wa/db';
+import { prisma, DEFAULT_STAGES } from '@wa/db';
 import { hashPassword, createSession } from '@/lib/auth';
 
 function slugify(name: string) {
@@ -88,6 +88,11 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
           languages: ['ru', 'kk'],
           forbidden: 'Выдумывать наличие товара, цены и сроки. Давать скидки.',
         },
+      });
+
+      // Воронка CRM с этапами по умолчанию — их можно переименовать.
+      await tx.pipelineStage.createMany({
+        data: DEFAULT_STAGES.map((s) => ({ ...s, companyId: company.id })),
       });
 
       await tx.auditLog.create({

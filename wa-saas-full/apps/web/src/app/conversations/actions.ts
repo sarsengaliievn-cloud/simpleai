@@ -11,14 +11,19 @@ import { assertCanSendFreeText, sendWhatsAppText, markWhatsAppRead, sendErrorTex
  * без этой проверки можно было вписать строку в диалог другой компании.
  */
 async function switchMode(conversationId: string, mode: 'AI' | 'HUMAN', note: string) {
-  const { db, user } = await requireCompany();
+  const { db, user, ownConversations } = await requireCompany();
 
   const { count } = await db.conversation.updateMany({
-    where: { id: conversationId, mode: mode === 'AI' ? 'HUMAN' : 'AI' },
+    where: { id: conversationId, mode: mode === 'AI' ? 'HUMAN' : 'AI', ...ownConversations },
     data: { mode },
   });
   // 0 — чужой диалог, несуществующий id или режим уже такой (двойной клик).
   if (count === 0) return;
+
+  // Забрал диалог — он и ведёт клиента, если ещё никому не передан.
+  if (mode === 'HUMAN') {
+    await db.conversation.updateMany({ where: { id: conversationId, assigneeId: null }, data: { assigneeId: user.id } });
+  }
 
   await db.message.create({
     data: {
@@ -53,10 +58,10 @@ export async function sendMessage(conversationId: string, text: string) {
   if (!body) return { ok: false as const, error: 'Пустое сообщение' };
   if (body.length > 4096) return { ok: false as const, error: 'WhatsApp принимает до 4096 символов' };
 
-  const { db, user } = await requireCompany();
+  const { db, user, ownConversations } = await requireCompany();
 
   const conversation = await db.conversation.findFirst({
-    where: { id: conversationId },
+    where: { id: conversationId, ...ownConversations },
     include: { customer: true, phoneNumber: true },
   });
   if (!conversation) return { ok: false as const, error: 'Диалог не найден' };
@@ -111,9 +116,9 @@ export async function sendMessage(conversationId: string, text: string) {
 
 /** Отметить прочитанным при открытии диалога. */
 export async function markRead(conversationId: string) {
-  const { db } = await requireCompany();
+  const { db, ownConversations } = await requireCompany();
   const { count } = await db.conversation.updateMany({
-    where: { id: conversationId, unreadCount: { gt: 0 } },
+    where: { id: conversationId, unreadCount: { gt: 0 }, ...ownConversations },
     data: { unreadCount: 0 },
   });
   // Без лишней перерисовки, если читать было нечего.

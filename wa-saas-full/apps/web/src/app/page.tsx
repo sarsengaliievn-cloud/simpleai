@@ -1,7 +1,7 @@
 import Link from 'next/link';
 
 export const metadata = {
-  title: 'Zerde — AI-ассистент для WhatsApp',
+  title: 'SaudaBot — AI-ассистент для WhatsApp',
   description: 'Ассистент отвечает клиентам в WhatsApp: наличие, цена, доставка. Сложное передаёт менеджеру.',
 };
 
@@ -40,7 +40,7 @@ export default function LandingPage() {
     <>
       <header className="nav">
         <div className="pub nav-in">
-          <span className="logo"><span className="logo-mark" />Zerde</span>
+          <span className="logo"><span className="logo-mark" />SaudaBot</span>
           <nav className="nav-links">
             <a href="#how">Как работает</a>
             <a href="#features">Возможности</a>
@@ -138,7 +138,7 @@ export default function LandingPage() {
 
       <footer className="foot">
         <div className="pub spread" style={{ flexWrap: 'wrap', gap: 16 }}>
-          <span>© 2026 Zerde. Алматы, Казахстан</span>
+          <span>© 2026 SaudaBot. Алматы, Казахстан</span>
         </div>
       </footer>
     </>

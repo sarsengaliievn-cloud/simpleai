@@ -1,19 +1,24 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { prisma } from '@wa/db';
 import { getCurrentUser } from '@/lib/session';
 import { LoginForm } from '@/components/LoginForm';
 
 export const dynamic = 'force-dynamic';
 
 export default async function LoginPage() {
-  if (await getCurrentUser()) redirect('/conversations');
+  const current = await getCurrentUser();
+  // Без членства в компании (убран из команды) — не уводим в панель:
+  // оттуда его вернуло бы сюда же, и страница крутилась бы по кругу.
+  const member = current && (await prisma.membership.findFirst({ where: { userId: current.id }, select: { id: true } }));
+  if (member) redirect('/conversations');
 
   return (
     <div className="auth">
       <div className="auth-card">
         <Link href="/" className="logo" style={{ marginBottom: 26 }}>
           <span className="logo-mark" />
-          Zerde
+          SaudaBot
         </Link>
         <div className="card card-p" style={{ padding: 28 }}>
           <h1>С возвращением</h1>

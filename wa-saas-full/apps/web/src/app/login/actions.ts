@@ -37,6 +37,13 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   }
 
   resetLoginFailures(email);
+
+  // Владелец убрал сотрудника из команды — пароль верный, но работать не с чем.
+  const membership = await prisma.membership.findFirst({ where: { userId: user.id }, select: { id: true } });
+  if (!membership) {
+    return { email, error: 'Доступ к компании закрыт. Обратитесь к владельцу аккаунта.' };
+  }
+
   const h = await headers();
   await createSession(user.id, {
     ip: h.get('x-forwarded-for')?.split(',')[0]?.trim() ?? undefined,

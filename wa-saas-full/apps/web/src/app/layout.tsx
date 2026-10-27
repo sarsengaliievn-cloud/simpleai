@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import '../styles/tokens.css';
 
 export const metadata = {
-  title: 'Zerde — AI-ассистент для WhatsApp',
+  title: 'SaudaBot — AI-ассистент для WhatsApp',
   description: 'Ассистент отвечает клиентам в WhatsApp, сложное передаёт менеджеру.',
 };
 

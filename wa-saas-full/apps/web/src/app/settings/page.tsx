@@ -1,7 +1,7 @@
 import { requireCompany } from '@/lib/session';
 import { Sidebar } from '@/components/Sidebar';
 import { saveCompany } from './actions';
-import { timeAgo } from '@/lib/format';
+import { timeAgo, agoText } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,15 +13,15 @@ const ACTIONS: Record<string, string> = {
 };
 
 export default async function SettingsPage() {
-  const { company, db, user } = await requireCompany();
+  const { company, db, user, role } = await requireCompany('settings:manage');
 
   const logs = await db.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 30 });
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} />
       <div className="main">
-        <header className="top"><h1>Настройки</h1></header>
+        <header className="top"><div className="top-t"><h1>Настройки</h1><p className="top-hint">Данные компании и журнал изменений</p></div></header>
 
         <div className="page page-narrow">
           <form action={saveCompany} className="card card-p" style={{ marginBottom: 16 }}>
@@ -70,7 +70,7 @@ export default async function SettingsPage() {
                 <tbody>
                   {logs.map((log) => (
                     <tr key={log.id}>
-                      <td className="muted small" style={{ width: 130 }}>{timeAgo(log.createdAt)} назад</td>
+                      <td className="muted small" style={{ width: 130 }}>{agoText(log.createdAt)}</td>
                       <td className="small">{ACTIONS[log.action] ?? log.action}</td>
                       <td className="tiny muted mono">{log.entityId?.slice(0, 8) ?? ''}</td>
                     </tr>

@@ -13,7 +13,7 @@ export default async function RegisterPage() {
       <div className="auth-card">
         <Link href="/" className="logo" style={{ marginBottom: 26 }}>
           <span className="logo-mark" />
-          Zerde
+          SaudaBot
         </Link>
         <div className="card card-p" style={{ padding: 28 }}>
           <h1>Создать аккаунт</h1>

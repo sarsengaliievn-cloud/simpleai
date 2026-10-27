@@ -35,6 +35,8 @@ model User {
   sessions      Session[]
   auditLogs     AuditLog[]
   assignedConversations Conversation[] @relation("ConversationAssignee")
+  assignedDeals         Deal[]         @relation("DealAssignee")
+  dealEvents            DealEvent[]    @relation("DealEventActor")
   authoredMessages      Message[]      @relation("MessageAuthor")
 
   @@map("users")
@@ -102,6 +104,9 @@ model Company {
   aiConfiguration   AIConfiguration?
   knowledgeDocuments KnowledgeDocument[]
   knowledgeChunks    KnowledgeChunk[]
+  pipelineStages     PipelineStage[]
+  deals              Deal[]
+  dealEvents         DealEvent[]
 
   @@map("companies")
 }
@@ -213,6 +218,7 @@ model Customer {
 
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   conversations Conversation[]
+  deals         Deal[]
 
   @@unique([companyId, waId])
   @@index([companyId, lastContactAt])
@@ -241,6 +247,7 @@ model Conversation {
   phoneNumber WhatsAppPhoneNumber? @relation(fields: [phoneNumberId], references: [id])
   assignee    User?                @relation("ConversationAssignee", fields: [assigneeId], references: [id])
   messages    Message[]
+  deals       Deal[]
 
   @@index([companyId, status, lastMessageAt])
   @@index([companyId, customerId])
@@ -472,4 +479,94 @@ model KnowledgeChunk {
 
   @@index([companyId, documentId])
   @@map("knowledge_chunks")
+}
+
+// ─────────────────────────────────────────────
+// CRM: воронка и сделки
+// ─────────────────────────────────────────────
+
+/// Роль этапа в воронке. Названия этапов компания меняет сама, а по kind
+/// система понимает, что этап означает: заказ, выдачу, отказ.
+enum StageKind {
+  NEW   // клиент только написал
+  WORK  // в работе: у менеджера, думает и любые свои этапы
+  ORDER // оформлен заказ — нужны сумма и товар
+  WON   // выдан / оплачен
+  LOST  // отказ — нужна причина
+}
+
+model PipelineStage {
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @db.Uuid
+  name      String
+  kind      StageKind
+  position  Int
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deals   Deal[]
+
+  @@index([companyId, position])
+  @@map("pipeline_stages")
+}
+
+/// Сделка — путь одного обращения клиента от первого сообщения до заказа
+/// или отказа. У клиента одновременно не больше одной открытой сделки.
+model Deal {
+  id             String    @id @default(uuid()) @db.Uuid
+  companyId      String    @db.Uuid
+  customerId     String    @db.Uuid
+  conversationId String?   @db.Uuid
+  stageId        String    @db.Uuid
+  assigneeId     String?   @db.Uuid
+  /// Сумма заказа в тенге.
+  amount         Int?
+  /// Товар: модель, размер, цвет — как менеджер записал.
+  product        String?
+  comment        String?
+  lostReason     String?
+  /// Откуда пришёл клиент: whatsapp, позже — объявление.
+  source         String    @default("whatsapp")
+  stageChangedAt DateTime  @default(now())
+  /// Даты ключевых событий — по ним считается конверсия за период.
+  assignedAt     DateTime?
+  orderedAt      DateTime?
+  wonAt          DateTime?
+  lostAt         DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  stage        PipelineStage @relation(fields: [stageId], references: [id])
+  assignee     User?         @relation("DealAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  events       DealEvent[]
+
+  @@index([companyId, stageId])
+  @@index([companyId, assigneeId])
+  @@index([companyId, createdAt])
+  @@index([companyId, customerId])
+  @@map("deals")
+}
+
+/// История сделки: смена этапа, передача менеджеру, заказ, заметка.
+model DealEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @db.Uuid
+  dealId      String   @db.Uuid
+  actorUserId String?  @db.Uuid
+  /// created | stage | assigned | order | lost | note
+  type        String
+  text        String
+  data        Json?
+  createdAt   DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deal    Deal    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  actor   User?   @relation("DealEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, dealId, createdAt])
+  @@map("deal_events")
 }

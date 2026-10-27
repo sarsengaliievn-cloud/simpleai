@@ -13,12 +13,15 @@ type Item = {
   unread: number;
   mode: 'AI' | 'HUMAN';
   status: 'OPEN' | 'PENDING' | 'CLOSED';
+  stage: { name: string; kind: string } | null;
+  assignee: string | null;
 };
 
 const FILTERS: Array<[string, string]> = [
   ['all', 'Все'],
+  ['new', 'Ждут менеджера'],
   ['unread', 'Непрочитанные'],
-  ['human', 'У менеджера'],
+  ['human', 'У людей'],
   ['closed', 'Закрытые'],
 ];
 
@@ -34,11 +37,14 @@ export function ConversationList({
   activeId,
   filter,
   query,
+  showNew = true,
 }: {
   items: Item[];
   activeId: string | null;
   filter: string;
   query: string;
+  /** «Ждут менеджера» — для того, кто раздаёт клиентов. */
+  showNew?: boolean;
 }) {
   const router = useRouter();
   const [q, setQ] = useState(query);
@@ -69,7 +75,7 @@ export function ConversationList({
           onChange={(e) => setQ(e.target.value)}
         />
         <div className="filter-row">
-          {FILTERS.map(([key, label]) => (
+          {FILTERS.filter(([key]) => showNew || key !== 'new').map(([key, label]) => (
             <Link
               key={key}
               href={href({ filter: key, q: query })}
@@ -101,24 +107,17 @@ export function ConversationList({
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="spread">
                 <span className="conv-n">{c.name}</span>
-                <span className="tiny muted">{timeAgo(c.lastMessageAt)}</span>
+                <span className="tiny muted" suppressHydrationWarning>{timeAgo(c.lastMessageAt)}</span>
               </div>
               <div className="conv-p">{c.preview}</div>
-              <div className="row" style={{ marginTop: 5, gap: 6 }}>
-                {c.status === 'CLOSED' ? (
-                  <span className="chip">Закрыт</span>
-                ) : c.mode === 'AI' ? (
-                  <span className="chip chip-ok">
-                    <span className="dot" />
-                    AI
-                  </span>
-                ) : (
-                  <span className="chip chip-warn">
-                    <span className="dot" />
-                    Менеджер
-                  </span>
+              <div className="row" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
+                {c.stage && (
+                  <span className={`stage-chip k-${c.stage.kind.toLowerCase()}`}>{c.stage.name}</span>
                 )}
-                {c.unread > 0 && <span className="nav-badge">{c.unread}</span>}
+                <span className="tiny muted">
+                  {c.status === 'CLOSED' ? 'закрыт' : c.mode === 'AI' ? 'отвечает бот' : c.assignee ? c.assignee : 'ждёт менеджера'}
+                </span>
+                {c.unread > 0 && <span className="nav-badge" style={{ marginLeft: 'auto' }}>{c.unread}</span>}
               </div>
             </div>
           </Link>

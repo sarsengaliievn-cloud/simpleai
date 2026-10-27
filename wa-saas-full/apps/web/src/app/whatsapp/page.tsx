@@ -2,7 +2,7 @@ import { requireCompany } from '@/lib/session';
 import { Sidebar } from '@/components/Sidebar';
 import { ConnectSection } from '@/components/ConnectSection';
 import { disconnectNumber } from './actions';
-import { timeAgo } from '@/lib/format';
+import { timeAgo, agoText } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +14,7 @@ const STATUS: Record<string, [string, string]> = {
 };
 
 export default async function WhatsAppPage() {
-  const { company, db, user } = await requireCompany();
+  const { company, db, user, role } = await requireCompany('whatsapp:manage');
 
   const numbers = await db.whatsAppPhoneNumber.findMany({
     orderBy: { createdAt: 'asc' },
@@ -29,11 +29,11 @@ export default async function WhatsAppPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} />
       <div className="main">
         <header className="top">
-          <h1>WhatsApp</h1>
-          <span className="chip" style={{ marginLeft: 'auto' }}>{numbers.length} номеров</span>
+          <div className="top-t"><h1>WhatsApp</h1><p className="top-hint">Номера, на которые пишут клиенты</p></div>
+          <span className="chip" style={{ marginLeft: 'auto', flex: 'none' }}>{numbers.length} номеров</span>
         </header>
 
         <div className="page page-narrow">
@@ -63,7 +63,7 @@ export default async function WhatsAppPage() {
                   ['Лимит отправки', n.messagingLimit ?? 'нет данных'],
                   ['Способ подключения', n.account.connectedVia === 'MANUAL' ? 'вручную (WABA клиента)' : 'через Meta'],
                   ['Токен', '••••••••'],
-                  ['Последнее входящее', lastEvent ? `${timeAgo(lastEvent.createdAt)} назад` : 'ещё не было'],
+                  ['Последнее входящее', lastEvent ? agoText(lastEvent.createdAt) : 'ещё не было'],
                 ] as Array<[string, string]>).map(([k, v]) => (
                   <div className="spread" style={{ padding: '11px 0', borderTop: '1px solid var(--line)' }} key={k}>
                     <span className="small muted">{k}</span>

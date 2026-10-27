@@ -19,7 +19,7 @@ async function enqueue(companyId: string, documentId: string, text: string) {
 }
 
 export async function uploadDocument(formData: FormData) {
-  const { company, db } = await requireCompany();
+  const { company, db } = await requireCompany('knowledge:manage');
   const file = formData.get('file');
 
   if (!(file instanceof File) || file.size === 0) {
@@ -60,7 +60,7 @@ export async function uploadDocument(formData: FormData) {
 }
 
 export async function addManualNote(title: string, text: string) {
-  const { company, db } = await requireCompany();
+  const { company, db } = await requireCompany('knowledge:manage');
   if (text.trim().length < 30) return { ok: false as const, error: 'Слишком короткий текст — нужно хотя бы 30 символов' };
   if (text.length > MAX_TEXT) return { ok: false as const, error: 'Слишком длинный текст' };
 
@@ -80,7 +80,7 @@ export async function addManualNote(title: string, text: string) {
 }
 
 export async function removeDocument(documentId: string) {
-  const { company, db } = await requireCompany();
+  const { company, db } = await requireCompany('knowledge:manage');
   // Сначала убеждаемся, что документ свой: deleteChunks — сырой SQL,
   // он сам фильтрует по company_id, но лишний запрос в чужие данные не нужен.
   const doc = await db.knowledgeDocument.findFirst({ where: { id: documentId }, select: { id: true } });

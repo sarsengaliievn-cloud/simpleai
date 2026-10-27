@@ -13,7 +13,7 @@ type Props = { searchParams: Promise<{ saved?: string }> };
 
 export default async function AssistantPage({ searchParams }: Props) {
   const { saved } = await searchParams;
-  const { company, db, user } = await requireCompany();
+  const { company, db, user, role } = await requireCompany('ai:manage');
 
   const config = (await db.aIConfiguration.findFirst()) ?? {
     enabled: false, model: 'claude-sonnet-4-6', role: `Консультант компании «${company.name}»`,
@@ -29,11 +29,11 @@ export default async function AssistantPage({ searchParams }: Props) {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} />
       <div className="main">
         <header className="top">
-          <h1>Ассистент</h1>
-          <span className={`chip ${config.enabled ? 'chip-ok' : ''}`} style={{ marginLeft: 'auto' }}>
+          <div className="top-t"><h1>Как отвечает ассистент</h1><p className="top-hint">Как бот разговаривает с клиентами: тон, правила, рабочие часы</p></div>
+          <span className={`chip ${config.enabled ? 'chip-ok' : ''}`} style={{ marginLeft: 'auto', flex: 'none' }}>
             <span className="dot" />{config.enabled ? 'Отвечает клиентам' : 'Выключен'}
           </span>
         </header>

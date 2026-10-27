@@ -1,5 +1,6 @@
 import { randomBytes, scryptSync } from 'node:crypto';
 import { prisma } from './client.js';
+import { DEFAULT_STAGES } from './crm.js';
 
 /** Тот же формат, что и в приложении: salt:hash, scrypt. */
 function hashPassword(password: string) {
@@ -56,6 +57,14 @@ async function main() {
       forbidden: 'Выдумывать наличие товара, цены и сроки. Давать скидки.',
     },
   });
+
+  // Этапы воронки CRM.
+  if ((await prisma.pipelineStage.count({ where: { companyId: company.id } })) === 0) {
+    await prisma.pipelineStage.createMany({
+      data: DEFAULT_STAGES.map((s) => ({ ...s, companyId: company.id })),
+    });
+  }
+  const newStage = await prisma.pipelineStage.findFirstOrThrow({ where: { companyId: company.id, kind: 'NEW' } });
 
   const account = await prisma.whatsAppAccount.upsert({
     where: { companyId_wabaId: { companyId: company.id, wabaId: '104857392018477' } },
@@ -141,6 +150,17 @@ async function main() {
         // Окно считается от последнего входящего сообщения клиента.
         windowExpiresAt: new Date(ago(p.hours).getTime() + 24 * HOUR),
         unreadCount: p.mode === 'AI' ? 1 : 0,
+      },
+    });
+
+    await prisma.deal.create({
+      data: {
+        companyId: company.id,
+        customerId: customer.id,
+        conversationId: conversation.id,
+        stageId: newStage.id,
+        createdAt: ago(48),
+        stageChangedAt: ago(48),
       },
     });
 

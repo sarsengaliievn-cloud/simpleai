@@ -15,7 +15,7 @@ const STATUS: Record<string, [string, string]> = {
 };
 
 export default async function KnowledgePage() {
-  const { company, db, user } = await requireCompany();
+  const { company, db, user, role } = await requireCompany('knowledge:manage');
 
   const docs = await db.knowledgeDocument.findMany({ orderBy: { createdAt: 'desc' }, take: 100 });
   const chunks = docs.reduce((sum, d) => sum + d.chunkCount, 0);
@@ -23,12 +23,12 @@ export default async function KnowledgePage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} />
       <div className="main">
         <AutoRefresh active={indexing} />
         <header className="top">
-          <h1>База знаний</h1>
-          <span className="chip" style={{ marginLeft: 'auto' }}>
+          <div className="top-t"><h1>База знаний</h1><p className="top-hint">Отсюда бот берёт ответы: цены, размеры, доставка, адреса</p></div>
+          <span className="chip" style={{ marginLeft: 'auto', flex: 'none' }}>
             {docs.length} документов · {chunks} фрагментов
           </span>
         </header>

@@ -5,7 +5,7 @@ import { prisma } from '@wa/db';
 import { requireCompany } from '@/lib/session';
 
 export async function saveCompany(formData: FormData) {
-  const { company, db } = await requireCompany();
+  const { company, db } = await requireCompany('settings:manage');
 
   const data = {
     name: String(formData.get('name') ?? '').trim() || company.name,

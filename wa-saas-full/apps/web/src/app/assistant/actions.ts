@@ -13,7 +13,7 @@ const LANGS = ['ru', 'kk', 'en'];
  * на проверке типов. Результат сообщаем через ?saved=1 в адресе.
  */
 export async function saveAssistant(formData: FormData): Promise<void> {
-  const { db, user } = await requireCompany();
+  const { db, user } = await requireCompany('ai:manage');
 
   const threshold = Number.parseInt(String(formData.get('threshold') ?? ''), 10);
   const delay = Number.parseInt(String(formData.get('replyDelaySec') ?? ''), 10);

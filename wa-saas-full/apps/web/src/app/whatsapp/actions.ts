@@ -20,7 +20,7 @@ const GRAPH = graphBase();
 export async function checkNumber(raw: string) {
   // Проверка нужна только своим: без входа она превращалась в способ
   // узнать, какие номера подключены к платформе.
-  const { company } = await requireCompany();
+  const { company } = await requireCompany('whatsapp:manage');
   const digits = raw.replace(/\D/g, '');
 
   if (digits.length < 10 || digits.length > 15) {
@@ -78,7 +78,7 @@ export async function completeEmbeddedSignup(input: {
   wabaId: string;
   phoneNumberId: string;
 }) {
-  const { company, db, user } = await requireCompany();
+  const { company, db, user } = await requireCompany('whatsapp:manage');
 
   if (!/^\d{5,25}$/.test(input.wabaId) || !/^\d{5,25}$/.test(input.phoneNumberId) || !input.code) {
     return { ok: false as const, error: 'Meta вернула неполные данные подключения' };
@@ -221,7 +221,7 @@ export async function completeEmbeddedSignup(input: {
    ───────────────────────────────────────────────────────────── */
 
 export async function connectNumber(formData: FormData) {
-  const { company, db, user } = await requireCompany();
+  const { company, db, user } = await requireCompany('whatsapp:manage');
 
   const wabaId = String(formData.get('wabaId') ?? '').trim();
   const phoneNumberId = String(formData.get('phoneNumberId') ?? '').trim();
@@ -326,7 +326,7 @@ export async function connectNumber(formData: FormData) {
 }
 
 export async function disconnectNumber(numberId: string) {
-  const { db, user } = await requireCompany();
+  const { db, user } = await requireCompany('whatsapp:manage');
   const { count } = await db.whatsAppPhoneNumber.updateMany({
     where: { id: numberId, status: { not: 'DISCONNECTED' } },
     data: { status: 'DISCONNECTED' },

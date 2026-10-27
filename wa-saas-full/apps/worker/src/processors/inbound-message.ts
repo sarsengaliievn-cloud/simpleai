@@ -1,6 +1,6 @@
 import { prisma, forCompany } from '@wa/db';
 import { getProvider, type InboundMessage, type StatusUpdate, type EchoMessage } from '@wa/whatsapp';
-import { windowExpiryFrom, type InboundMessageJob } from '@wa/core';
+import { windowExpiryFrom, ensureOpenDeal, type InboundMessageJob } from '@wa/core';
 import { scheduleAiReply } from '../queues.js';
 
 /**
@@ -175,6 +175,10 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
     });
   }
 
+  // Сделка в CRM заводится сама: до сохранения сообщения, чтобы повтор
+  // задачи (сообщение уже есть — выходим раньше) её не пропустил.
+  await ensureOpenDeal(db, { customerId: customer.id, conversationId: conversation.id, at: inbound.timestamp });
+
   let saved: { id: string };
   try {
     saved = await db.message.create({
@@ -269,6 +273,7 @@ async function handleEcho(echo: EchoMessage): Promise<string | null> {
       data: { customerId: customer.id, phoneNumberId: number.id, mode: 'HUMAN' } as never,
     });
   }
+  await ensureOpenDeal(db, { customerId: customer.id, conversationId: conversation.id, at: echo.timestamp });
 
   try {
     await db.message.create({

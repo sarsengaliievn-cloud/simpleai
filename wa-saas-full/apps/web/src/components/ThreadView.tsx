@@ -127,7 +127,7 @@ export function ThreadView({
                 </span>
               )}
               {m.text ?? (m.type === 'AUDIO' ? null : <em className="small">Вложение: {ATTACH[m.type] ?? m.type.toLowerCase()}</em>)}
-              <span className="msg-t">
+              <span className="msg-t" suppressHydrationWarning>
                 {clockWithDay(m.createdAt)}
                 {AUTHOR[m.authorType] ? ` · ${AUTHOR[m.authorType]}${m.fromPhone ? ' с телефона' : ''}` : ''}
                 {m.direction === 'OUTBOUND' && <Ticks status={m.status} errorCode={m.errorCode} />}

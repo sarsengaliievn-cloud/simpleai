@@ -47,3 +47,21 @@ export function clockWithDay(date: Date) {
     timeZone: tz,
   }).format(date);
 }
+
+/** Сумма в тенге с пробелами: 12 500 ₸. Дублирует core — тот в браузер не тянем. */
+export function money(amount: number | null | undefined) {
+  if (amount === null || amount === undefined) return '—';
+  return `${new Intl.NumberFormat('ru-RU').format(amount).replace(/[\u00a0\u202f]/g, ' ')} ₸`;
+}
+
+/** «3 дн на этапе», «5 ч на этапе». */
+export function since(date: Date) {
+  const t = timeAgo(date);
+  return t === 'только что' ? 'только что' : t === 'вчера' ? 'с вчера' : t;
+}
+
+/** «5 мин назад», «только что», «вчера» — без «только что назад». */
+export function agoText(date: Date) {
+  const t = timeAgo(date);
+  return t === 'только что' || t === 'вчера' ? t : `${t} назад`;
+}

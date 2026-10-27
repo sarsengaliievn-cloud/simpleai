@@ -10,7 +10,7 @@ type Body = { question?: unknown; history?: unknown };
  * Используется и тестовым чатом, и отладкой поиска по базе знаний.
  */
 export async function POST(request: Request) {
-  const { company, db } = await requireCompany();
+  const { company, db } = await requireCompany('ai:manage');
 
   let body: Body;
   try {

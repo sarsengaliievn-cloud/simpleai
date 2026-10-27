@@ -16,6 +16,9 @@ export const TENANT_MODELS = new Set([
   'AIConfiguration',
   'KnowledgeDocument',
   'KnowledgeChunk',
+  'PipelineStage',
+  'Deal',
+  'DealEvent',
 ]);
 
 /**
