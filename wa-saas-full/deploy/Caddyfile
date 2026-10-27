@@ -22,3 +22,22 @@
 
 	reverse_proxy web:3000
 }
+
+# Лендинг на главном домене: saudabot.kz и www.saudabot.kz. Один статичный
+# файл из папки landing/ — Netlify не нужен, HTTPS Caddy получает так же сам.
+{$LANDING_DOMAIN:saudabot.kz} {
+	encode zstd gzip
+	root * /srv/landing
+	file_server
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+www.{$LANDING_DOMAIN:saudabot.kz} {
+	redir https://{$LANDING_DOMAIN:saudabot.kz}{uri} permanent
+}

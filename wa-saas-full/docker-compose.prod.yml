@@ -101,9 +101,12 @@ services:
       - "443:443/udp"
     environment:
       DOMAIN: ${DOMAIN}
+      # Главный домен с лендингом (www перенаправляется на него).
+      LANDING_DOMAIN: ${LANDING_DOMAIN:-saudabot.kz}
       ACME_EMAIL: ${ACME_EMAIL:?задайте ACME_EMAIL в .env.production — на него Let's Encrypt пишет о сертификате}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./landing:/srv/landing:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
