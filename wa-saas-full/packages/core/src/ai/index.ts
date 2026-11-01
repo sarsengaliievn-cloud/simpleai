@@ -8,5 +8,5 @@ export { transcribeAudio } from './transcribe.js';
 export { chunkText, estimateTokens } from './chunk.js';
 export { buildSystemPrompt } from './prompt.js';
 export type { AIConfigLike } from './prompt.js';
-export { answerQuestion, normalizeHistory } from './rag.js';
+export { answerQuestion, normalizeHistory, isSmallTalk } from './rag.js';
 export type { AnswerResult } from './rag.js';

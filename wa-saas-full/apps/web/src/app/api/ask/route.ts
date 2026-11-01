@@ -79,9 +79,19 @@ export async function POST(request: Request) {
   } catch (error) {
     // Наружу — человеческий текст, подробности в логи.
     console.error('[ask] сбой', error);
-    const message = (error as Error).message.includes('API_KEY')
-      ? 'Не задан ключ AI-провайдера в .env'
-      : 'Ассистент сейчас недоступен. Попробуйте ещё раз.';
+    const message = aiErrorText((error as Error).message);
     return Response.json({ error: message }, { status: 503 });
   }
+}
+
+/** Понятная причина сбоя ИИ для владельца — по тексту ошибки провайдера. */
+function aiErrorText(raw: string) {
+  const provider = /openai/i.test(raw) ? 'OpenAI' : /gemini|google/i.test(raw) ? 'Gemini' : 'ИИ';
+  if (raw.includes('API_KEY') || /не задан/i.test(raw)) return `Не задан ключ ${provider} на сервере (.env.production)`;
+  if (/\b401\b|invalid_api_key|API key not valid|Incorrect API key/i.test(raw)) {
+    return `Ключ ${provider} на сервере неверный — проверьте его в .env.production и перезапустите сервер`;
+  }
+  if (/insufficient_quota|billing|exceeded your current quota/i.test(raw)) return `На счету ${provider} закончились деньги — пополните баланс у провайдера`;
+  if (/\b429\b|rate limit|RESOURCE_EXHAUSTED/i.test(raw)) return `${provider} временно ограничил запросы — попробуйте через минуту`;
+  return 'Ассистент сейчас недоступен. Попробуйте ещё раз.';
 }

@@ -21,6 +21,38 @@ export type AnswerResult = {
 /** Ниже этого совпадения считаем, что в базе знаний ответа просто нет. */
 const MIN_RELEVANCE = 0.35;
 
+/*
+ * Приветствие и «спасибо» в базе знаний не ищем: ответа там нет, и раньше
+ * бот на «Здравствуйте» звал менеджера. Признаём такую реплику, только если
+ * в ней есть приветствие или благодарность и кроме них ничего — «да» или
+ * «ок» в ответ на вопрос бота сюда не попадут.
+ */
+const SMALLTALK_CORE = new Set([
+  'привет', 'приветствую', 'здравствуйте', 'здравствуй', 'здрасте', 'здрасьте', 'добрый', 'доброе', 'доброй',
+  'салем', 'сәлем', 'салам', 'сәлеметсіз', 'сәлеметсізбе', 'салеметсиз', 'салеметсизбе', 'саламатсызба',
+  'ассаляму', 'ассалям', 'ассалам', 'ассаламу', 'алейкум', 'алейкуму', 'уалейкум', 'қайырлы', 'кайырлы',
+  'hi', 'hello', 'hey', 'спасибо', 'спс', 'благодарю', 'рахмет', 'рақмет', 'thanks', 'thank',
+  'дела', 'қалайсыз', 'калайсыз', 'қалай', 'калай', 'жағдай', 'жагдай',
+]);
+const SMALLTALK_EXTRA = new Set([
+  'день', 'вечер', 'утро', 'ночи', 'таң', 'кеш', 'күн', 'тан', 'кун', 'как', 'ваши', 'у', 'вас', 'вам', 'большое',
+  'огромное', 'you', 'very', 'much', 'ок', 'окей', 'ok', 'хорошо', 'понятно', 'ясно', 'отлично', 'супер', 'ладно',
+  'пожалуйста', 'и', 'еще', 'ещё', 'всё', 'все', 'норм', 'класс', 'круто', 'жақсы', 'жаксы', 'көп', 'коп', 'бе', 'ба', 'ме', 'ма',
+]);
+
+export function isSmallTalk(text: string): boolean {
+  const words = text.toLowerCase().replace(/ё/g, 'е').match(/[\p{L}]+/gu) ?? [];
+  if (words.length === 0 || words.length > 8) return false;
+  const core = (w: string) => SMALLTALK_CORE.has(w) || SMALLTALK_CORE.has(w.replace(/е/g, 'ё'));
+  const extra = (w: string) => SMALLTALK_EXTRA.has(w) || SMALLTALK_EXTRA.has(w.replace(/е/g, 'ё'));
+  return words.some(core) && words.every((w) => core(w) || extra(w));
+}
+
+const SMALLTALK_NOTE =
+  'Фрагментов базы знаний для этого сообщения нет: клиент просто здоровается или благодарит. ' +
+  'Ответь коротко и тепло на его языке: поздоровайся или ответь на благодарность и спроси, чем можешь помочь. ' +
+  'Ничего не говори о товарах, ценах, наличии и доставке. Верни confidence 100 и needs_human = false.';
+
 export async function answerQuestion(params: {
   companyId: string;
   company: { name: string; description?: string | null; city?: string | null };
@@ -30,6 +62,28 @@ export async function answerQuestion(params: {
 }): Promise<AnswerResult> {
   const choice = resolveAI(params.config);
   const ai = getAIFor(choice);
+
+  if (isSmallTalk(params.question)) {
+    const result = await ai.generate({
+      system: buildSystemPrompt(params.config, params.company),
+      messages: normalizeHistory([
+        ...(params.history ?? []),
+        { role: 'user', content: `${SMALLTALK_NOTE}\n\nСообщение клиента: ${params.question}` },
+      ]),
+    });
+    const parsed = parseAnswer(result.text);
+    return {
+      answer: parsed.answer,
+      confidence: parsed.answer ? parsed.confidence : 0,
+      modelConfidence: parsed.confidence,
+      topScore: 0,
+      needsHuman: !parsed.answer || parsed.needsHuman,
+      hits: [],
+      usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, embedTokens: 0 },
+      ai: choice,
+    };
+  }
+
   const embedTokens = estimateTokens(params.question);
 
   const [embedding] = await ai.embed([params.question]);
