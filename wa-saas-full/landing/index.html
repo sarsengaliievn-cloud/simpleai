@@ -481,7 +481,7 @@ const navBar = () => `
     <a href="#/#price">Тарифы</a><a href="#/#faq">Вопросы</a>
   </nav>
   <div class="row">
-    <a href="#/login" class="btn btn-quiet">Войти</a>
+    <a href="https://app.saudabot.kz/login" class="btn btn-quiet">Войти</a>
     <a href="https://wa.me/77089298041?text=%D0%97%D0%B4%D1%80%D0%B0%D0%B2%D1%81%D1%82%D0%B2%D1%83%D0%B9%D1%82%D0%B5!%20%D0%A5%D0%BE%D1%87%D1%83%20%D0%BF%D0%BE%D0%B4%D0%BA%D0%BB%D1%8E%D1%87%D0%B8%D1%82%D1%8C%20AI-%D0%B0%D1%81%D1%81%D0%B8%D1%81%D1%82%D0%B5%D0%BD%D1%82%D0%B0" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Начать бесплатно</a>
   </div>
 </div></header>`;
@@ -594,7 +594,7 @@ function viewLanding(){
 
 <footer class="foot"><div class="pub spread" style="flex-wrap:wrap;gap:16px">
   <span>© 2026 Simple. Алматы, Казахстан Аксай 55/1</span>
-  <span class="row" style="gap:20px"><a href="#/">Договор оферты</a><a href="#/">Политика данных</a><a href="#/">Поддержка</a></span>
+  <span class="row" style="gap:20px"><a href="#/">Договор оферты</a><a href="/privacy.html">Политика данных</a><a href="#/">Поддержка</a></span>
 </div></footer>`;
 }
 
@@ -1411,8 +1411,12 @@ function render(){
     route = parts[1] || '';
     const p = PAGES[route] || PAGES[''];
     html = shell(p[1](), p[0], p[2]);
-  } else if(parts[0] === 'login')       html = viewLogin();
-  else if(parts[0] === 'register')      html = viewRegister();
+  } else if(parts[0] === 'login' || parts[0] === 'register'){
+    // Настоящий вход и регистрация — в панели. Демо-формы здесь только путали:
+    // принимали любой пароль и открывали «Demo Store».
+    location.replace('https://app.saudabot.kz/' + parts[0]);
+    return;
+  }
   else if(parts[0] === 'onboarding')    html = viewOnboarding();
   else                                  html = viewLanding();
   el.innerHTML = html;
