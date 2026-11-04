@@ -450,6 +450,14 @@ model AIConfiguration {
 
   /// Ответ бота на фото от клиента (каталог + просьба написать артикул). Пусто — фото сразу менеджеру.
   photoReply     String  @default("")
+  /// Каталог склада (JSON по ссылке): наличие, размеры и цены для ответов.
+  catalogUrl        String  @default("")
+  /// Ссылка на модель для клиента, {id} — id модели.
+  catalogProductUrl String  @default("")
+  /// Ссылка на фото модели, {id} — id модели.
+  catalogPhotoUrl   String  @default("")
+  /// Отправлять фото подобранных моделей.
+  catalogPhotos     Boolean @default(true)
   /// Последний сбой ИИ (понятная причина). Сбрасывается первым успешным ответом.
   lastErrorAt    DateTime?
   lastError      String?

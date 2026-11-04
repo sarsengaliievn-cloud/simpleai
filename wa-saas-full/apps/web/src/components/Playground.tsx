@@ -14,7 +14,16 @@ type Turn = {
   parts?: string[];
   /** Сколько стоил ответ, «1,24 ₸». */
   cost?: string;
+  /** Как бот понял вопрос — видно владельцу, клиенту нет. */
+  understood?: string;
+  /** Что нашлось на складе. */
+  stock?: string;
+  /** Передал бы менеджеру заказ с этой сводкой. */
+  order?: string;
+  photos?: Array<{ url: string; caption: string }>;
 };
+
+const INTENT: Record<string, string> = { stock: 'наличие', pick: 'подбор', buy: 'готов купить', info: 'вопрос', other: 'другое' };
 
 export function Playground({ tone, threshold, documents }: { tone: string; threshold: number; documents: number }) {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -52,6 +61,16 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
               needsHuman: json.needsHuman,
               parts: Array.isArray(json.parts) && json.answer && !json.needsHuman ? json.parts : undefined,
               sources: [...new Set<string>(json.hits?.slice(0, 3).map((h: { title: string }) => h.title) ?? [])].slice(0, 2),
+              understood: json.understanding
+                ? `понял как: «${json.understanding.query}» · ${INTENT[json.understanding.intent] ?? json.understanding.intent}${json.understanding.size ? ` · размер ${json.understanding.size}` : ''}`
+                : undefined,
+              stock: json.catalog
+                ? json.catalog.error
+                  ? `склад недоступен: ${json.catalog.error}`
+                  : json.catalog.mode === 'none' ? 'на складе не нашёл подходящего' : `склад: ${json.catalog.mode === 'product' ? 'нашёл модель' : `подобрал ${json.catalog.count}`}`
+                : undefined,
+              order: json.order ? `🛒 Передал бы менеджеру:\n${json.order.summary}` : undefined,
+              photos: Array.isArray(json.photos) ? json.photos : undefined,
             }
           : { role: 'assistant', content: (json.error ?? `Ошибка ${res.status}`) + (json.detail ? `\n\nПодробно: ${json.detail}` : ''), service: true },
       ]);
@@ -97,6 +116,19 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
               {(t.parts?.length ? t.parts : [t.content]).map((part, j) => (
                 <div key={j} className={`msg ${t.role === 'user' ? 'msg-in' : 'msg-out'}`}>{part}</div>
               ))}
+              {t.photos?.map((p) => (
+                <div key={p.url} className="msg msg-out" style={{ padding: 4, maxWidth: 220 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.url} alt="" style={{ width: '100%', borderRadius: 8, display: 'block' }} />
+                  <div className="tiny" style={{ padding: '4px 6px', whiteSpace: 'pre-line' }}>{p.caption}</div>
+                </div>
+              ))}
+              {t.order && <div className="msg msg-out" style={{ background: 'var(--amber-soft)', color: 'var(--ink)', whiteSpace: 'pre-line' }}>{t.order}</div>}
+              {t.role === 'assistant' && (t.understood || t.stock) && (
+                <div className="tiny muted" style={{ alignSelf: 'flex-end', marginTop: -5, textAlign: 'right', maxWidth: '80%' }}>
+                  {[t.understood, t.stock].filter(Boolean).join(' · ')}
+                </div>
+              )}
               {t.role === 'assistant' && t.confidence !== undefined && (
                 <div className="tiny muted" style={{ alignSelf: 'flex-end', marginTop: -5 }}>
                   уверенность {t.confidence}%

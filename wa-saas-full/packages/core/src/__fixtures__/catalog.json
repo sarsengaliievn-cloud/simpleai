@@ -1,0 +1,28 @@
+{
+  "updatedAt": 1762300000000,
+  "count": 5,
+  "stores": [
+    { "id": "s1", "name": "SHOQAI Розыбакиева", "city": "Алматы", "address": "Розыбакиева 247", "phone": "", "warehouse": false },
+    { "id": "s2", "name": "SHOQAI Наурызбай", "city": "Алматы", "address": "Наурызбай батыра 28", "phone": "", "warehouse": false },
+    { "id": "s3", "name": "SHOQAI Астана", "city": "Астана", "address": "Кенесары 40", "phone": "", "warehouse": false },
+    { "id": "w1", "name": "Центральный склад", "city": "Алматы", "address": "", "phone": "", "warehouse": true }
+  ],
+  "banners": [],
+  "items": [
+    { "id": "P100", "article": "Z-701", "name": "Зимние ботинки Арктика", "brand": "SHOQAI", "category": "Ботинки", "season": "Зима", "color": "чёрный", "gender": "m", "description": "", "hasPhoto": true, "photos": 1, "price": 33900, "oldPrice": 39900,
+      "sizes": [{ "size": "40", "inStock": true }, { "size": "41", "inStock": true }, { "size": "42", "inStock": true }, { "size": "43", "inStock": false }],
+      "avail": { "s1": [["40", 0], ["42", 1]], "s2": [["41", 0], ["42", 0]], "w1": [["41", 0]] } },
+    { "id": "P101", "article": "Z-702", "name": "Зимние сапоги Снежана", "brand": "SHOQAI", "category": "Сапоги", "season": "Зима", "color": "бежевый", "gender": "w", "description": "", "hasPhoto": true, "photos": 2, "price": 36900, "oldPrice": null,
+      "sizes": [{ "size": "37", "inStock": true }, { "size": "38", "inStock": true }, { "size": "39", "inStock": false }],
+      "avail": { "s1": [["37", 0], ["38", 0]], "s3": [["38", 1]] } },
+    { "id": "P102", "article": "Z-703", "name": "Зимние ботинки Вега женские", "brand": "SHOQAI", "category": "Ботинки", "season": "Зима", "color": "чёрный", "gender": "w", "description": "", "hasPhoto": true, "photos": 1, "price": 29900, "oldPrice": 33900,
+      "sizes": [{ "size": "38", "inStock": true }, { "size": "39", "inStock": true }],
+      "avail": { "s2": [["38", 0], ["39", 0]], "s3": [["38", 0]] } },
+    { "id": "P103", "article": "D-310", "name": "Осенние кроссовки Ветер", "brand": "SHOQAI", "category": "Кроссовки", "season": "Демисезон", "color": "белый", "gender": "w", "description": "", "hasPhoto": false, "photos": 0, "price": 24900, "oldPrice": null,
+      "sizes": [{ "size": "38", "inStock": true }],
+      "avail": { "s1": [["38", 0]] } },
+    { "id": "P104", "article": "K-15", "name": "Детские дутики Мишка", "brand": "SHOQAI", "category": "Дутики", "season": "Зима", "color": "синий", "gender": "kids", "description": "", "hasPhoto": true, "photos": 1, "price": 15900, "oldPrice": null,
+      "sizes": [{ "size": "30", "inStock": true }, { "size": "32", "inStock": true }],
+      "avail": { "s1": [["30", 0], ["32", 0]] } }
+  ]
+}

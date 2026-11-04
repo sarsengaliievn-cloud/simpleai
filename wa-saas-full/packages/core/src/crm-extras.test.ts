@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { stagesProblem, isStale, onShiftNow, cleanLostReasons, lostReasonsOf, LOST_REASONS, SHIFT_IDLE_MS, SHIFT_MAX_MS, sourceLabel } from './crm.js';
+import { type StageDraft, stagesProblem, isStale, onShiftNow, cleanLostReasons, lostReasonsOf, LOST_REASONS, SHIFT_IDLE_MS, SHIFT_MAX_MS, sourceLabel } from './crm.js';
 import { parseMetaWebhook } from '@wa/whatsapp';
 
 const H = 3600_000;
 
 describe('этапы: проверка перед сохранением', () => {
-  const base = [
-    { id: 'n', name: 'Новый', kind: 'NEW' as const },
-    { id: 'w', name: 'У менеджера', kind: 'WORK' as const },
-    { id: 'won', name: 'Выкупил', kind: 'WON' as const },
-    { id: 'l', name: 'Отказ', kind: 'LOST' as const },
+  const base: StageDraft[] = [
+    { id: 'n', name: 'Новый', kind: 'NEW' },
+    { id: 'w', name: 'У менеджера', kind: 'WORK' },
+    { id: 'won', name: 'Выкупил', kind: 'WON' },
+    { id: 'l', name: 'Отказ', kind: 'LOST' },
   ];
 
   it('нормальный список проходит, несколько финальных — тоже', () => {

@@ -19,6 +19,11 @@ import {
   type AiReplyJob,
   aiErrorReason,
   autoAssignConversation,
+  orderQuestion,
+  orderConfirmation,
+  sendWhatsAppMedia,
+  assertPublicUrl,
+  type AnswerResult,
 } from '@wa/core';
 import { getProvider } from '@wa/whatsapp';
 
@@ -139,7 +144,10 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     .filter((m) => m.text)
     .map((m) => ({ role: m.direction === 'INBOUND' ? ('user' as const) : ('assistant' as const), content: m.text! }));
 
-  const result = await answerQuestion({ companyId, company, config, question, history });
+  const catalog = config.catalogUrl.trim()
+    ? { url: config.catalogUrl.trim(), productUrl: config.catalogProductUrl.trim() || null, photoUrl: config.catalogPhotos ? config.catalogPhotoUrl.trim() || null : null }
+    : null;
+  const result = await answerQuestion({ companyId, company, config, question, history, catalog });
   // ИИ снова отвечает — плашка «ИИ не работает» больше не нужна.
   if (config.lastErrorAt) {
     await db.aIConfiguration.updateMany({ data: { lastErrorAt: null, lastError: null } });
@@ -150,6 +158,12 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     model: result.ai.model,
     ...result.usage,
   }, conversationId);
+
+  // ── Клиент готов купить ────────────────────
+  if (result.order) {
+    await handleOrder(db, { conversationId, result, lastProviderMessageId: last.providerMessageId, phoneNumberRowId: conversation.phoneNumber?.id ?? null });
+    return;
+  }
 
   if (result.needsHuman || !result.answer) {
     await handOff(
@@ -202,7 +216,119 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     }
   }
 
+  // Подобранные модели — фотографиями, как показал бы продавец.
+  if (sentCount === parts.length && result.photos?.length) {
+    await sendPhotos(db, conversationId, result.photos);
+  }
+
   console.log(`[ai] ${conversationId}: ответ отправлен (${result.confidence}%, частей ${sentCount}/${parts.length})`);
+}
+
+/** Сколько ждём, пока клиент ответит на уточнение заказа, прежде чем спросить снова. */
+const ORDER_ASK_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Клиент сказал «беру». Не хватает модели, размера или города — бот один
+ * раз переспрашивает. Всё есть (или уже спрашивали) — короткое «передаю
+ * менеджеру» клиенту, а менеджеру сводка: модель, размер, город, наличие.
+ * Резерв бот не ставит — это решает менеджер.
+ */
+async function handleOrder(
+  db: Db,
+  input: { conversationId: string; result: AnswerResult; lastProviderMessageId: string | null; phoneNumberRowId: string | null },
+) {
+  const { conversationId, result } = input;
+  const order = result.order!;
+  const markRead = async () => {
+    if (input.lastProviderMessageId && input.phoneNumberRowId) {
+      await markWhatsAppRead(db, { phoneNumberRowId: input.phoneNumberRowId, providerMessageId: input.lastProviderMessageId });
+    }
+  };
+
+  if (order.missing.length) {
+    const asked = await db.message.findFirst({
+      where: { conversationId, authorType: 'AI', createdAt: { gte: new Date(Date.now() - ORDER_ASK_MS) }, metadata: { path: ['orderAsk'], equals: true } },
+      select: { id: true },
+    });
+    if (!asked) {
+      const outcome = await sendAsAssistant(db, conversationId, orderQuestion(order), { orderAsk: true, missing: order.missing });
+      if (outcome === 'sent') {
+        await markRead();
+        console.log(`[ai] ${conversationId}: готов купить — уточняю ${order.missing.join(', ')}`);
+        return;
+      }
+      if (outcome === 'skipped') return;
+    }
+  }
+
+  const outcome = await sendAsAssistant(db, conversationId, orderConfirmation(order.lang), { orderConfirm: true });
+  if (outcome === 'sent') await markRead();
+
+  // В сделку — что выбрал клиент; сумму и товар менеджер поправит при оформлении.
+  const deal = await db.deal.findFirst({
+    where: { conversationId, stage: { kind: { notIn: ['WON', 'LOST'] } } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (deal) {
+    await db.deal.updateMany({
+      where: { id: deal.id },
+      data: {
+        ...(order.product && !deal.product ? { product: order.product.slice(0, 300) } : {}),
+        ...(order.amount && !deal.amount ? { amount: order.amount } : {}),
+        ...(order.comment && !deal.comment ? { comment: order.comment.slice(0, 2000) } : {}),
+      },
+    });
+    await db.dealEvent.create({
+      data: { dealId: deal.id, type: 'note', text: `Бот: клиент готов купить.\n${order.summary}` } as never,
+    });
+  }
+
+  const missingNote = order.missing.length ? `\nНе уточнил: ${order.missing.map((f) => ({ model: 'модель', size: 'размер', city: 'город или способ получения' })[f]).join(', ')}.` : '';
+  await handOff(db, conversationId, `🛒 Клиент готов купить — диалог передан менеджеру.\n${order.summary}${missingNote}`, {
+    order: { summary: order.summary, product: order.product, amount: order.amount, comment: order.comment, missing: order.missing },
+  });
+  console.log(`[ai] ${conversationId}: готов купить — передано менеджеру`);
+}
+
+/** Фото моделей из каталога: скачиваем со склада и отправляем с подписью. Сбой фото — не повод звать менеджера. */
+async function sendPhotos(db: Db, conversationId: string, photos: Array<{ url: string; caption: string }>) {
+  const conversation = await db.conversation.findFirst({ where: { id: conversationId }, include: { customer: true, phoneNumber: true } });
+  if (!conversation?.phoneNumber || conversation.mode !== 'AI' || !isWindowOpen(conversation.windowExpiresAt)) return;
+  for (const photo of photos.slice(0, 3)) {
+    try {
+      await assertPublicUrl(photo.url);
+      const res = await fetch(photo.url, { signal: AbortSignal.timeout(20_000), redirect: 'error' });
+      const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim();
+      if (!res.ok || !/^image\/(jpeg|png)$/.test(type)) continue;
+      const data = Buffer.from(await res.arrayBuffer());
+      if (data.length === 0 || data.length > 5 * 1024 * 1024) continue;
+      await sleep(800);
+      const sent = await sendWhatsAppMedia(db, {
+        phoneNumberRowId: conversation.phoneNumber.id,
+        to: conversation.customer.waId,
+        kind: 'image',
+        data,
+        mimeType: type,
+        caption: photo.caption.slice(0, 1000),
+      });
+      await db.message.create({
+        data: {
+          conversationId,
+          direction: 'OUTBOUND',
+          authorType: 'AI',
+          type: 'IMAGE',
+          text: photo.caption,
+          mediaMimeType: type,
+          providerMessageId: sent.providerMessageId,
+          status: 'SENT',
+          sentAt: new Date(),
+          metadata: { mediaId: sent.mediaId, catalogPhoto: true },
+        } as never,
+      });
+    } catch (error) {
+      console.warn(`[ai] ${conversationId}: фото модели не отправлено —`, (error as Error).message.slice(0, 200));
+    }
+  }
 }
 
 const ATTACHMENT_REASON: Record<string, string> = {

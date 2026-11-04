@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireCompany } from '@/lib/session';
-import { TIME_RE, MODELS, providerAvailable, embedFamily, resolveAI } from '@wa/core';
+import { TIME_RE, MODELS, providerAvailable, embedFamily, resolveAI, loadCatalog, CatalogError, formatMoney } from '@wa/core';
 import { ingestQueue, JOB_CLEANUP } from '@/lib/queue';
 
 const TONES = ['Дружелюбный', 'Профессиональный', 'Короткий', 'Подробный', 'Формальный'];
@@ -115,4 +115,47 @@ export async function saveModelAction(provider: string, model: string): Promise<
   revalidatePath('/assistant');
   revalidatePath('/knowledge');
   return { ok: true, reindexed };
+}
+
+export type CatalogResult = { ok: true; models: number; stores: string[]; sample: string } | { ok: false; error: string };
+
+/**
+ * Каталог склада: ссылка на выгрузку моделей и остатков. Перед сохранением
+ * проверяем, что по ссылке действительно каталог, — иначе бот молча
+ * отвечал бы без наличия.
+ */
+export async function saveCatalogAction(input: { url: string; productUrl: string; photoUrl: string; photos: boolean }): Promise<CatalogResult> {
+  const { db, user } = await requireCompany('ai:manage');
+  const url = String(input.url ?? '').trim().slice(0, 500);
+  const productUrl = String(input.productUrl ?? '').trim().slice(0, 500);
+  const photoUrl = String(input.photoUrl ?? '').trim().slice(0, 500);
+  for (const [label, t] of [['модель', productUrl], ['фото', photoUrl]] as const) {
+    if (t && !/^https:\/\//.test(t)) return { ok: false, error: `Ссылка на ${label} должна начинаться с https://` };
+    if (t && !t.includes('{id}')) return { ok: false, error: `В ссылке на ${label} должно быть {id} — туда подставится номер модели` };
+  }
+
+  let summary: { models: number; stores: string[]; sample: string } = { models: 0, stores: [], sample: '' };
+  if (url) {
+    try {
+      const catalog = await loadCatalog({ url }, { fresh: true });
+      const first = catalog.items.find((i) => i.sizes.some((s) => s.inStock)) ?? catalog.items[0]!;
+      summary = {
+        models: catalog.items.length,
+        stores: catalog.stores.filter((s) => !s.warehouse).map((s) => [s.city, s.address || s.name].filter(Boolean).join(', ')),
+        sample: `${first.name}${first.article ? ` (арт. ${first.article})` : ''} — ${formatMoney(first.price)}, размеры: ${first.sizes.filter((s) => s.inStock).map((s) => s.size).join(', ')}`,
+      };
+    } catch (error) {
+      return { ok: false, error: error instanceof CatalogError ? error.message : 'Не удалось загрузить каталог' };
+    }
+  }
+
+  const data = { catalogUrl: url, catalogProductUrl: productUrl, catalogPhotoUrl: photoUrl, catalogPhotos: !!input.photos };
+  const existing = await db.aIConfiguration.findFirst();
+  if (!existing) return { ok: false, error: 'Сначала сохраните настройки ассистента' };
+  await db.aIConfiguration.updateMany({ where: { id: existing.id }, data });
+  await db.auditLog.create({
+    data: { action: 'ai.catalog.updated', actorUserId: user.id, entityType: 'AIConfiguration', entityId: existing.id, metadata: { url, models: summary.models } } as never,
+  });
+  revalidatePath('/assistant');
+  return { ok: true, ...summary };
 }

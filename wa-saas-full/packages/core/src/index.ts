@@ -7,3 +7,4 @@ export * from './whatsapp-send.js';
 export * from './crm.js';
 export * from './billing.js';
 export * from './ai/index.js';
+export * from './catalog.js';

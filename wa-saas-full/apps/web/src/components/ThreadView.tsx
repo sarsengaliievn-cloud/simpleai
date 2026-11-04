@@ -198,7 +198,10 @@ export function ThreadView({
 
       <div className="thread-b">
         {messages.map((m) =>
-          m.authorType === 'SYSTEM' ? (
+          m.authorType === 'SYSTEM' && m.text?.startsWith('🛒') ? (
+            // Клиент готов купить — сводка для менеджера карточкой, а не мелкой строкой.
+            <div key={m.id} className="order-note">{m.text}</div>
+          ) : m.authorType === 'SYSTEM' ? (
             <div key={m.id} className="tiny muted" style={{ textAlign: 'center', padding: '6px 0' }}>
               {m.text}
             </div>

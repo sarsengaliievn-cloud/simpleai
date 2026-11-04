@@ -602,3 +602,4 @@ video.msg-media{max-height:360px}
   .stage-edit-list li .stage-tools{grid-area:tools}
   .stage-edit-list li .stage-tools .btn{padding-left:6px;padding-right:6px}
 }
+.order-note{align-self:center;max-width:min(520px,100%);margin:6px 0;padding:10px 14px;border-radius:var(--r-sm);background:var(--amber-soft);color:var(--ink);font-size:13px;line-height:1.5;white-space:pre-line;overflow-wrap:anywhere;border:1px solid rgba(180,105,14,.22)}

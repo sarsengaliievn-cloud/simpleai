@@ -6,6 +6,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { isSuperAdmin } from '@/lib/admin';
 import { buildSystemPrompt } from '@wa/core';
 import { saveAssistant } from './actions';
+import { CatalogSettings } from '@/components/CatalogSettings';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,7 @@ export default async function AssistantPage({ searchParams }: Props) {
     replyDelaySec: 8, splitReplies: true, splitMaxChars: 350,
     workingHoursEnabled: false, workingDays: [1, 2, 3, 4, 5, 6, 7], workStart: '09:00', workEnd: '21:00',
     offHoursMessage: '', transcribeVoice: true, photoReply: '', lastErrorAt: null, lastError: null,
+    catalogUrl: '', catalogProductUrl: '', catalogPhotoUrl: '', catalogPhotos: true,
   };
 
   const preview = buildSystemPrompt(config, company);
@@ -80,6 +82,10 @@ export default async function AssistantPage({ searchParams }: Props) {
             </div>
           )}
           <ModelPicker options={options} current={{ provider: choice.provider, model: choice.model }} />
+
+          {'id' in config && (
+            <CatalogSettings initial={{ url: config.catalogUrl, productUrl: config.catalogProductUrl, photoUrl: config.catalogPhotoUrl, photos: config.catalogPhotos }} />
+          )}
 
           <form action={saveAssistant}>
             <div className="card card-p" style={{ marginBottom: 16 }}>

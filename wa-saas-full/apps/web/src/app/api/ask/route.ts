@@ -1,5 +1,5 @@
 import { requireCompany } from '@/lib/session';
-import { answerQuestion, splitReply, hasBalance, recordUsage, billingProvider, formatTiyn, aiErrorReason } from '@wa/core';
+import { answerQuestion, splitReply, hasBalance, recordUsage, billingProvider, formatTiyn, aiErrorReason, orderQuestion, orderConfirmation } from '@wa/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +50,9 @@ export async function POST(request: Request) {
       config,
       question,
       history,
+      catalog: config.catalogUrl.trim()
+        ? { url: config.catalogUrl.trim(), productUrl: config.catalogProductUrl.trim() || null, photoUrl: config.catalogPhotos ? config.catalogPhotoUrl.trim() || null : null }
+        : null,
     });
     if (config.lastErrorAt) await db.aIConfiguration.updateMany({ data: { lastErrorAt: null, lastError: null } });
 
@@ -59,7 +62,29 @@ export async function POST(request: Request) {
       ...result.usage,
     });
 
+    // Готов купить: как в WhatsApp — один раз уточнить, потом передать менеджеру.
+    if (result.order) {
+      const lastBot = [...history].reverse().find((m) => m.role === 'assistant')?.content ?? '';
+      const asked = /^(Хорошо! Подскажите|Жақсы! Нақтылап)/.test(lastBot);
+      const ask = result.order.missing.length > 0 && !asked;
+      const text = ask ? orderQuestion(result.order) : orderConfirmation(result.order.lang);
+      return Response.json({
+        answer: text,
+        cost: formatTiyn(charged),
+        parts: [text],
+        confidence: 100,
+        needsHuman: false,
+        threshold: config.confidenceThreshold,
+        hits: [],
+        understanding: result.understanding,
+        order: ask ? null : { summary: result.order.summary, missing: result.order.missing },
+      });
+    }
+
     return Response.json({
+      understanding: result.understanding,
+      catalog: result.catalog,
+      photos: result.photos ?? [],
       answer: result.answer,
       /** Сколько стоил этот ответ — видно в тестовом чате. */
       cost: formatTiyn(charged),

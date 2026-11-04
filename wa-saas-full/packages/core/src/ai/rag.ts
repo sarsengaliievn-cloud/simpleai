@@ -3,6 +3,11 @@ import { getAIFor, resolveAI, type AIChoice } from './factory.js';
 import { estimateTokens } from './chunk.js';
 import { buildSystemPrompt, type AIConfigLike } from './prompt.js';
 import type { ChatMessage } from './provider.js';
+import { understandMessage, type Understanding } from './understand.js';
+import {
+  loadCatalog, searchCatalog, catalogBlock, storesLine, describeItem, sizeAvailability, photoLink, productLink,
+  type Catalog, type CatalogMatch, type CatalogSource,
+} from '../catalog.js';
 
 export type AnswerResult = {
   answer: string;
@@ -16,6 +21,27 @@ export type AnswerResult = {
   usage: { inputTokens: number; outputTokens: number; embedTokens: number };
   /** Каким ИИ отвечали — для списания по цене модели. */
   ai: AIChoice;
+  /** Как бот понял сообщение: переписанный вопрос, намерение, модель, размер. */
+  understanding?: Understanding | null;
+  /** Что нашлось в каталоге склада. */
+  catalog?: { mode: CatalogMatch['mode']; count: number; error?: string } | null;
+  /** Клиент готов купить: что известно и чего не хватает. */
+  order?: OrderDraft | null;
+  /** Фото подобранных моделей — бот отправит их после ответа. */
+  photos?: Array<{ url: string; caption: string }>;
+};
+
+export type OrderField = 'model' | 'size' | 'city';
+export type OrderDraft = {
+  missing: OrderField[];
+  lang: 'ru' | 'kk';
+  /** Для менеджера: модель, размер, цена, город, доставка, оплата, наличие. */
+  summary: string;
+  /** В сделку: «Зимние ботинки (арт. 1234), размер 41». */
+  product: string;
+  amount: number | null;
+  /** В сделку: «Астана · Казпочта · Kaspi». */
+  comment: string;
 };
 
 /** Ниже этого совпадения считаем, что в базе знаний ответа просто нет. */
@@ -63,6 +89,8 @@ export async function answerQuestion(params: {
   config: AIConfigLike & { confidenceThreshold: number; aiProvider?: string | null; aiModel?: string | null };
   question: string;
   history?: ChatMessage[];
+  /** Каталог склада: наличие, размеры и цены берутся отсюда. */
+  catalog?: CatalogSource | null;
 }): Promise<AnswerResult> {
   const choice = resolveAI(params.config);
   const ai = getAIFor(choice);
@@ -88,15 +116,78 @@ export async function answerQuestion(params: {
     };
   }
 
-  const embedTokens = estimateTokens(params.question);
+  // ── 1. Понять, что спрашивают ────────────────────────────
+  // Разговорный казахский, смесь языков, «а 42 есть?» со ссылкой на прошлое —
+  // модель переписывает вопрос нормально и достаёт модель, размер, город.
+  const history = params.history ?? [];
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let u: Understanding | null = null;
+  try {
+    const r = await understandMessage(ai, params.question, history);
+    u = r.understanding;
+    inputTokens += r.inputTokens;
+    outputTokens += r.outputTokens;
+  } catch (error) {
+    // Не разобрали — отвечаем по исходному тексту, как раньше.
+    console.warn('[ai] разбор сообщения не удался:', (error as Error).message.slice(0, 200));
+  }
+  const query = u?.query && u.query !== params.question ? u.query : params.question;
 
-  const [embedding] = await ai.embed([params.question]);
-  const hits = embedding ? await searchChunks(params.companyId, embedding, 5) : [];
+  // ── 2. Склад ───────────────────────────────────────────────
+  let catalog: Catalog | null = null;
+  let match: CatalogMatch | null = null;
+  let catalogError: string | undefined;
+  const wantsCatalog = !!u && (['stock', 'pick', 'buy'].includes(u.intent) || !!u.article || !!u.model || !!u.size);
+  if (params.catalog?.url && wantsCatalog) {
+    try {
+      catalog = await loadCatalog(params.catalog);
+      const context = [...history.map((m) => m.content), params.question].join('\n');
+      match = searchCatalog(catalog, {
+        article: u!.article, model: u!.model, size: u!.size, gender: u!.gender, season: u!.season,
+        color: u!.color, maxPrice: u!.maxPrice, context,
+      }, params.catalog.productUrl);
+    } catch (error) {
+      catalogError = (error as Error).message.slice(0, 200);
+      console.warn('[ai] каталог недоступен:', catalogError);
+    }
+  }
+  const catalogInfo = params.catalog?.url && wantsCatalog
+    ? { mode: match?.mode ?? 'none', count: match?.items.length ?? 0, ...(catalogError ? { error: catalogError } : {}) }
+    : null;
+
+  // ── 3. Готов купить — собрать заказ для менеджера ─────────
+  if (u?.intent === 'buy') {
+    const order = draftOrder(u, catalog, match, params.catalog ?? null);
+    return {
+      answer: '', confidence: 100, modelConfidence: 100, topScore: 0, needsHuman: false, hits: [],
+      usage: { inputTokens, outputTokens, embedTokens: 0 }, ai: choice,
+      understanding: u, catalog: catalogInfo, order,
+    };
+  }
+
+  // ── 4. База знаний: ищем и по исходному тексту, и по переписанному ──
+  const texts = query !== params.question ? [query, params.question] : [params.question];
+  const embedTokens = texts.reduce((sum, t) => sum + estimateTokens(t), 0);
+  const embeddings = await ai.embed(texts);
+  const found = new Map<string, SearchHit>();
+  for (const embedding of embeddings) {
+    if (!embedding) continue;
+    for (const h of await searchChunks(params.companyId, embedding, 5)) {
+      const prev = found.get(h.chunkId);
+      if (!prev || prev.score < h.score) found.set(h.chunkId, h);
+    }
+  }
+  const hits = [...found.values()].sort((a, b) => b.score - a.score).slice(0, 5);
   const relevant = hits.filter((h) => h.score >= MIN_RELEVANCE);
   const topScore = relevant[0]?.score ?? 0;
 
-  // База молчит — до модели даже не идём: дешевле и честнее.
-  if (relevant.length === 0) {
+  const stock = catalog && match && match.mode !== 'none' && params.catalog
+    ? [catalogBlock(catalog, match, params.catalog), storesLine(catalog)].filter(Boolean).join('\n\n')
+    : '';
+
+  // Ни базы, ни склада — до модели даже не идём: дешевле и честнее.
+  if (relevant.length === 0 && !stock) {
     return {
       answer: '',
       confidence: 0,
@@ -104,20 +195,27 @@ export async function answerQuestion(params: {
       topScore,
       needsHuman: true,
       hits,
-      usage: { inputTokens: 0, outputTokens: 0, embedTokens },
+      usage: { inputTokens, outputTokens, embedTokens },
       ai: choice,
+      understanding: u,
+      catalog: catalogInfo,
     };
   }
 
-  const context = relevant
-    .map((h, i) => `[${i + 1}] Источник: ${h.documentTitle}\n${h.content}`)
-    .join('\n\n---\n\n');
+  const context = [
+    relevant.length
+      ? `Фрагменты базы знаний:\n\n${relevant.map((h, i) => `[${i + 1}] Источник: ${h.documentTitle}\n${h.content}`).join('\n\n---\n\n')}`
+      : '',
+    stock
+      ? `${stock}\n\nНаличие, размеры и цены бери только из блока КАТАЛОГ — это данные склада на сейчас. Называя модель, добавь её ссылку из каталога. Точное количество пар не называй.`
+      : '',
+  ].filter(Boolean).join('\n\n===\n\n');
 
   const result = await ai.generate({
     system: buildSystemPrompt(params.config, params.company),
     messages: normalizeHistory([
-      ...(params.history ?? []),
-      { role: 'user', content: `Фрагменты базы знаний:\n\n${context}\n\n---\n\nВопрос клиента: ${params.question}` },
+      ...history,
+      { role: 'user', content: `${context}\n\n---\n\nВопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}` },
     ]),
   });
 
@@ -125,7 +223,15 @@ export async function answerQuestion(params: {
 
   // Модель склонна завышать уверенность в себе, поэтому итог ограничиваем
   // качеством найденных фрагментов: нет опоры в базе — нет высокой оценки.
-  const confidence = Math.min(parsed.confidence, Math.round(topScore * 100));
+  // Ответ по данным склада опирается на каталог, а не на базу знаний.
+  const confidence = stock ? parsed.confidence : Math.min(parsed.confidence, Math.round(topScore * 100));
+
+  const photos = match?.mode === 'pick' && params.catalog?.photoUrl
+    ? match.items.slice(0, 3).map((i) => ({
+        url: photoLink(params.catalog!, i.id),
+        caption: `${i.name} — ${new Intl.NumberFormat('ru-RU').format(i.price).replace(/[\u00a0\u202f]/g, ' ')} ₸${productLink(params.catalog!, i.id) ? `\n${productLink(params.catalog!, i.id)}` : ''}`,
+      })).filter((p) => p.url)
+    : [];
 
   return {
     answer: parsed.answer,
@@ -134,9 +240,73 @@ export async function answerQuestion(params: {
     topScore,
     needsHuman: parsed.needsHuman || confidence < params.config.confidenceThreshold,
     hits,
-    usage: { inputTokens: result.inputTokens, outputTokens: result.outputTokens, embedTokens },
+    usage: { inputTokens: inputTokens + result.inputTokens, outputTokens: outputTokens + result.outputTokens, embedTokens },
     ai: choice,
+    understanding: u,
+    catalog: catalogInfo,
+    photos,
   };
+}
+
+/**
+ * Заказ для менеджера из того, что клиент уже сказал. Без модели, размера
+ * (если есть склад с размерами) и города или способа получения менеджеру
+ * пришлось бы переспрашивать — этого не хватает в missing.
+ */
+export function draftOrder(u: Understanding, catalog: Catalog | null, match: CatalogMatch | null, source: CatalogSource | null): OrderDraft {
+  const item = match?.mode === 'product' && match.items.length === 1 ? match.items[0]! : null;
+  const size = u.size ? u.size.replace(',', '.').match(/\d{1,2}(?:\.5)?/)?.[0] ?? u.size : '';
+  const modelText = item ? `${item.name}${item.article ? ` (арт. ${item.article})` : ''}` : u.article ? `арт. ${u.article}${u.model ? `, ${u.model}` : ''}` : u.model;
+
+  const missing: OrderField[] = [];
+  if (!modelText) missing.push('model');
+  const sized = item ? item.sizes.length > 0 : !!catalog;
+  if (sized && !size) missing.push('size');
+  if (!u.city && !u.delivery) missing.push('city');
+
+  const product = [modelText, size ? `размер ${size}` : ''].filter(Boolean).join(', ');
+  const comment = [u.city, u.delivery, u.payment].filter(Boolean).join(' · ');
+  const lines = [
+    `Модель: ${modelText || 'не назвал'}${size ? `, размер ${size}` : ''}${item ? ` — ${new Intl.NumberFormat('ru-RU').format(item.price).replace(/[\u00a0\u202f]/g, ' ')} ₸` : ''}`,
+    u.city ? `Город: ${u.city}` : '',
+    u.delivery ? `Получение: ${u.delivery}` : '',
+    u.payment ? `Оплата: ${u.payment}` : '',
+  ];
+  if (item && size && catalog) {
+    const { here, order } = sizeAvailability(catalog, item, size);
+    lines.push(here.length ? `Наличие ${size}: ${here.join('; ')}` : order.length ? `Наличие ${size}: только на складе, под заказ` : `Наличие ${size}: нет ни в одном магазине`);
+  }
+  if (item && source) {
+    const link = productLink(source, item.id);
+    if (link) lines.push(link);
+  }
+  return {
+    missing,
+    lang: u.lang,
+    summary: lines.filter(Boolean).join('\n'),
+    product,
+    amount: item?.price ?? null,
+    comment,
+  };
+}
+
+const ASK: Record<'ru' | 'kk', Record<OrderField, string>> = {
+  ru: { model: 'какую модель берёте (артикул или ссылку из каталога)', size: 'какой размер', city: 'в какой город доставить или заберёте в магазине' },
+  kk: { model: 'қай модельді аласыз (артикул немесе каталогтағы сілтеме)', size: 'қай размер', city: 'қай қалаға жеткізу керек, әлде дүкеннен аласыз ба' },
+};
+
+/** «Хорошо! Подскажите, пожалуйста: какой размер и в какой город доставить…» */
+export function orderQuestion(order: Pick<OrderDraft, 'missing' | 'lang'>) {
+  const parts = order.missing.map((f) => ASK[order.lang][f]);
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} ${order.lang === 'kk' ? 'және' : 'и'} ${parts.at(-1)}` : parts[0] ?? '';
+  return order.lang === 'kk' ? `Жақсы! Нақтылап жіберіңізші: ${list}?` : `Хорошо! Подскажите, пожалуйста, ${list}?`;
+}
+
+/** Клиенту перед передачей менеджеру. */
+export function orderConfirmation(lang: 'ru' | 'kk') {
+  return lang === 'kk'
+    ? 'Керемет, тапсырысыңызды менеджерге беремін — ол бар-жоғын растап, төлем деректерін жібереді.'
+    : 'Отлично, передаю заказ менеджеру — он подтвердит наличие и пришлёт данные для оплаты.';
 }
 
 /**
