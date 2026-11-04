@@ -39,6 +39,9 @@ export type CatalogSource = {
 export class CatalogError extends Error {}
 
 const TTL_MS = 5 * 60 * 1000;
+const STALE_MS = 60 * 60 * 1000;
+/** Выгрузка склада при холодном старте отвечает долго — ждём до 50 секунд. */
+const FETCH_TIMEOUT_MS = 50_000;
 const MAX_BYTES = 20 * 1024 * 1024;
 const cache = new Map<string, { at: number; catalog: Catalog }>();
 
@@ -74,24 +77,49 @@ function isPrivateIp(ip: string) {
   return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
 }
 
-/** Загрузить каталог по ссылке (с кэшем на 5 минут). */
+const refreshing = new Map<string, Promise<Catalog>>();
+
+/**
+ * Загрузить каталог по ссылке. Свежие данные (до 5 минут) — из памяти.
+ * Устаревшие (до часа) — тоже сразу из памяти, а обновление идёт фоном:
+ * выгрузка склада при «холодном» старте отвечает десятки секунд, и клиент
+ * не должен этого ждать.
+ */
 export async function loadCatalog(source: CatalogSource, opts: { fresh?: boolean } = {}): Promise<Catalog> {
   const hit = cache.get(source.url);
-  if (!opts.fresh && hit && Date.now() - hit.at < TTL_MS) return hit.catalog;
+  const age = hit ? Date.now() - hit.at : Infinity;
+  if (!opts.fresh && hit && age < TTL_MS) return hit.catalog;
+  if (!opts.fresh && hit && age < STALE_MS) {
+    void refresh(source.url).catch((error) => console.warn('[catalog] фоновое обновление не удалось:', (error as Error).message.slice(0, 160)));
+    return hit.catalog;
+  }
+  try {
+    return await refresh(source.url);
+  } catch (error) {
+    // Склад недоступен — лучше остатки часовой давности, чем никаких.
+    if (hit && age < STALE_MS) return hit.catalog;
+    throw error;
+  }
+}
 
-  await assertPublicUrl(source.url);
+/** Один запрос к складу на ссылку одновременно: два клиента сразу не дёргают склад дважды. */
+function refresh(url: string): Promise<Catalog> {
+  const running = refreshing.get(url);
+  if (running) return running;
+  const job = fetchCatalog(url).finally(() => refreshing.delete(url));
+  refreshing.set(url, job);
+  return job;
+}
+
+async function fetchCatalog(url: string): Promise<Catalog> {
+  await assertPublicUrl(url);
   let res: Response;
   try {
-    res = await fetch(source.url, { signal: AbortSignal.timeout(25_000), headers: { accept: 'application/json' }, redirect: 'error' });
+    res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: { accept: 'application/json' }, redirect: 'error' });
   } catch (error) {
-    // Склад недоступен — лучше вчерашние остатки, чем никаких: отдаём старый кэш до часа.
-    if (hit && Date.now() - hit.at < 60 * 60 * 1000) return hit.catalog;
     throw new CatalogError(`Каталог не ответил: ${(error as Error).message.slice(0, 120)}`);
   }
-  if (!res.ok) {
-    if (hit && Date.now() - hit.at < 60 * 60 * 1000) return hit.catalog;
-    throw new CatalogError(`Каталог ответил ошибкой ${res.status}`);
-  }
+  if (!res.ok) throw new CatalogError(`Каталог ответил ошибкой ${res.status}`);
   const length = Number(res.headers.get('content-length') ?? 0);
   if (length > MAX_BYTES) throw new CatalogError('Каталог слишком большой');
   const text = await res.text();
@@ -105,8 +133,13 @@ export async function loadCatalog(source: CatalogSource, opts: { fresh?: boolean
   }
   const catalog = normalizeCatalog(raw);
   if (catalog.items.length === 0) throw new CatalogError('В каталоге нет ни одной модели');
-  cache.set(source.url, { at: Date.now(), catalog });
+  cache.set(url, { at: Date.now(), catalog });
   return catalog;
+}
+
+/** Заранее загрузить каталог — чтобы первый клиент не ждал «холодный» склад. */
+export function warmCatalog(source: CatalogSource) {
+  void loadCatalog(source).catch(() => {});
 }
 
 const str = (v: unknown, max = 300) => (typeof v === 'string' ? v.trim().slice(0, max) : typeof v === 'number' ? String(v) : '');
@@ -170,9 +203,22 @@ export type CatalogQuery = {
   maxPrice?: number | null;
   /** Весь текст диалога — ищем в нём артикулы и ссылки на модели. */
   context?: string;
+  /** Модели, которые бот уже показывал в этом диалоге, — при подборе предлагаем другие. */
+  exclude?: Set<string>;
+  /** Для тестов: источник случайности при перемешивании подбора. */
+  random?: () => number;
+  /** Клиент просит подобрать: ссылки из переписки и название модели не в счёт — нужны варианты. */
+  pick?: boolean;
 };
 
-export type CatalogMatch = { mode: 'product' | 'pick' | 'none'; items: CatalogItem[]; size: string | null };
+export type CatalogMatch = {
+  mode: 'product' | 'pick' | 'none';
+  items: CatalogItem[];
+  size: string | null;
+  /** Подбор: сколько всего подходит и сколько из них клиент ещё не видел. */
+  total?: number;
+  unseen?: number;
+};
 
 /** Найти модель, о которой говорит клиент, или подобрать подходящие. */
 export function searchCatalog(catalog: Catalog, q: CatalogQuery, productUrl?: string | null): CatalogMatch {
@@ -191,7 +237,9 @@ export function searchCatalog(catalog: Catalog, q: CatalogQuery, productUrl?: st
   }
 
   // 2. Ссылка на модель или артикул в переписке (последнее упоминание важнее).
-  const ctx = q.context ?? '';
+  // При подборе пропускаем: иначе «покажите ещё» цеплялось бы за модель,
+  // которую бот сам только что прислал.
+  const ctx = q.pick ? '' : q.context ?? '';
   if (ctx) {
     const ids = [...ctx.matchAll(/#p=([A-Za-z0-9_-]{4,128})/g)].map((m) => m[1]!);
     for (const id of ids.reverse()) {
@@ -209,7 +257,7 @@ export function searchCatalog(catalog: Catalog, q: CatalogQuery, productUrl?: st
   }
 
   // 3. Название модели словами клиента.
-  if (q.model && q.model.trim().length >= 3) {
+  if (!q.pick && q.model && q.model.trim().length >= 3) {
     const words = norm(q.model).split(' ').filter((w) => w.length >= 2);
     if (words.length) {
       const scored = catalog.items
@@ -242,10 +290,37 @@ export function searchCatalog(catalog: Catalog, q: CatalogQuery, productUrl?: st
     if (size && !i.sizes.some((s) => s.size === size && s.inStock)) return false;
     return i.sizes.some((s) => s.inStock);
   });
-  // Сначала то, что есть в большем числе магазинов, затем со скидкой.
+  // Уже показанные — в конец: «какие ещё есть?» должно давать новые модели.
+  const seen = q.exclude ?? new Set<string>();
+  const fresh = picked.filter((i) => !seen.has(i.id));
+  const pool = fresh.length >= 3 ? fresh : [...fresh, ...picked.filter((i) => seen.has(i.id))];
+  // Сначала то, что есть в большем числе магазинов, затем со скидкой, — но не
+  // всегда одни и те же: из лучших 12 берём случайные, иначе клиенты всю
+  // зиму видели бы одни и те же пять пар.
   const spread = (i: CatalogItem) => (size ? Object.values(i.avail).filter((l) => l.some(([s]) => s === size)).length : Object.keys(i.avail).length);
-  picked.sort((a, b) => spread(b) - spread(a) || Number(!!b.oldPrice) - Number(!!a.oldPrice) || a.price - b.price);
-  return { mode: picked.length ? 'pick' : 'none', items: picked.slice(0, 5), size };
+  const ranked = [...pool].sort((a, b) => Number(seen.has(a.id)) - Number(seen.has(b.id)) || spread(b) - spread(a) || Number(!!b.oldPrice) - Number(!!a.oldPrice) || a.price - b.price);
+  const head = ranked.slice(0, 12);
+  const rnd = q.random ?? Math.random;
+  for (let i = head.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rnd() * (i + 1));
+    [head[i], head[j]] = [head[j]!, head[i]!];
+  }
+  const chosen = [...head.filter((i) => !seen.has(i.id)), ...head.filter((i) => seen.has(i.id))].slice(0, 5);
+  return { mode: chosen.length ? 'pick' : 'none', items: chosen, size, total: picked.length, unseen: fresh.length };
+}
+
+/** Какие модели бот уже показывал: ссылки #p=… и ссылки на модель в его сообщениях. */
+export function shownProductIds(texts: string[], productUrl?: string | null) {
+  const ids = new Set<string>();
+  for (const t of texts) {
+    for (const m of t.matchAll(/#p=([A-Za-z0-9_-]{4,128})/g)) ids.add(m[1]!);
+    if (productUrl && productUrl.includes('{id}')) {
+      const [before, after = ''] = productUrl.split('{id}');
+      const re = new RegExp(`${escapeRe(before!)}([A-Za-z0-9_-]{4,128})${escapeRe(after)}`, 'g');
+      for (const m of t.matchAll(re)) ids.add(m[1]!);
+    }
+  }
+  return ids;
 }
 
 function escapeRe(s: string) {
@@ -284,6 +359,14 @@ export function describeItem(catalog: Catalog, item: CatalogItem, size: string |
   lines.push(`Цена: ${money(item.price)}${item.oldPrice ? ` (без скидки ${money(item.oldPrice)})` : ''}.`);
   const inStock = item.sizes.filter((s) => s.inStock).map((s) => s.size);
   lines.push(inStock.length ? `Размеры в наличии: ${inStock.join(', ')}.` : 'Сейчас нет ни одного размера.');
+  if (!size && inStock.length) {
+    // Размер не назван — по магазинам, чтобы бот сразу сказал, где что есть.
+    const byStore = catalog.stores
+      .map((st) => ({ st, sizes: (item.avail[st.id] ?? []).map(([s]) => s) }))
+      .filter((x) => x.sizes.length)
+      .map((x) => `${storeLabel(x.st)}${x.st.warehouse ? ' (склад, под заказ)' : ''} — ${x.sizes.join(', ')}`);
+    if (byStore.length) lines.push(`По магазинам: ${byStore.join('; ')}.`);
+  }
   if (size) {
     const { here, order } = sizeAvailability(catalog, item, size);
     if (here.length) lines.push(`Размер ${size} есть: ${here.join('; ')}.`);
@@ -305,8 +388,10 @@ export function catalogBlock(catalog: Catalog, match: CatalogMatch, source: Cata
     match.mode === 'product'
       ? match.items.length > 1
         ? 'КАТАЛОГ: под описание клиента подходят несколько моделей — уточни, какую он имеет в виду.'
-        : 'КАТАЛОГ: модель, о которой спрашивает клиент (данные склада на сейчас).'
-      : `КАТАЛОГ: модели в наличии под запрос клиента${match.size ? ` (размер ${match.size})` : ''} — предложи 2–3 из них со ссылками.`;
+        : `КАТАЛОГ: модель, о которой спрашивает клиент (данные склада на сейчас). Ответь прямо по ней: есть ли она и в каких магазинах${match.size ? '' : '; размер клиент не назвал — перечисли размеры в наличии и спроси, какой нужен'}. Не отправляй клиента искать самому в каталоге.`
+      : `КАТАЛОГ: модели в наличии под запрос клиента${match.size ? ` (размер ${match.size})` : ''} — предложи 2–3 из них со ссылками.` +
+        (match.unseen === 0 ? ' Новых моделей под этот запрос больше нет — скажи об этом и предложи другой сезон, цвет или бюджет.' : '') +
+        (!match.size ? ' Размер не назван — в конце спроси размер, чтобы подобрать точнее.' : '');
   return [head, ...match.items.map((i, n) => `${n + 1}) ${describeItem(catalog, i, match.size, source)}`)].join('\n\n');
 }
 

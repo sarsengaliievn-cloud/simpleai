@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { normalizeCatalog, searchCatalog, catalogBlock, describeItem, normSize, assertPublicUrl } from './catalog.js';
+import { normalizeCatalog, searchCatalog, catalogBlock, describeItem, normSize, assertPublicUrl, shownProductIds } from './catalog.js';
 import { parseUnderstanding } from './ai/understand.js';
 import { draftOrder, orderQuestion, orderConfirmation } from './ai/rag.js';
 
@@ -94,5 +94,46 @@ describe('готов купить', () => {
   it('без склада размер не обязателен', () => {
     const o = draftOrder({ ...base, model: 'чёрная сумка', delivery: 'заберу в магазине' }, null, null, null);
     expect(o.missing).toEqual([]);
+  });
+});
+
+describe('подбор не повторяется', () => {
+  it('уже показанные модели уходят в конец, новые — вперёд', () => {
+    const shown = new Set(['P101']);
+    const m = searchCatalog(catalog, { gender: 'w', season: 'зима', exclude: shown });
+    expect(m.items[0]!.id).toBe('P102');
+    expect(m.unseen).toBe(1);
+  });
+  it('все показаны — блок просит предложить другое', () => {
+    const m = searchCatalog(catalog, { gender: 'w', season: 'зима', exclude: new Set(['P101', 'P102']) });
+    expect(m.unseen).toBe(0);
+    expect(catalogBlock(catalog, m, source)).toMatch(/Новых моделей под этот запрос больше нет/);
+  });
+  it('разный порядок при разных запросах', () => {
+    const orders = new Set<string>();
+    let seed = 1;
+    for (let k = 0; k < 20; k += 1) {
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      orders.add(searchCatalog(catalog, { season: 'зима', random: rnd }).items.map((i) => i.id).join(','));
+    }
+    expect(orders.size).toBeGreaterThan(1);
+  });
+  it('ссылки, которые бот уже отправлял', () => {
+    expect([...shownProductIds(['Вот: https://sklad-obuv.web.app/shop/#p=P100 и #p=P104'], source.productUrl)]).toEqual(['P100', 'P104']);
+  });
+  it('модель без размера — размеры по магазинам и просьба назвать размер', () => {
+    const m = searchCatalog(catalog, { context: 'Мына модель бар ма?\nАртикул: Z-701\nНа сайте: https://sklad-obuv.web.app/shop/#p=P100' }, source.productUrl);
+    const block = catalogBlock(catalog, m, source);
+    expect(block).toMatch(/По магазинам: Алматы, Розыбакиева 247 — 40, 42; Алматы, Наурызбай батыра 28 — 41, 42; Алматы, Центральный склад \(склад, под заказ\) — 41/);
+    expect(block).toMatch(/спроси, какой нужен/);
+    expect(block).toMatch(/Не отправляй клиента искать самому/);
+  });
+});
+
+describe('подбор после показанных моделей', () => {
+  it('«покажите ещё» не цепляется за ссылку из прошлого ответа бота', () => {
+    const m = searchCatalog(catalog, { gender: 'w', season: 'зима', pick: true, context: 'Бот: Зимние сапоги — https://sklad-obuv.web.app/shop/#p=P101', exclude: new Set(['P101']) }, source.productUrl);
+    expect(m.mode).toBe('pick');
+    expect(m.items[0]!.id).toBe('P102');
   });
 });

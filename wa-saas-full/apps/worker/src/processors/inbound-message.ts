@@ -1,6 +1,6 @@
 import { prisma, forCompany } from '@wa/db';
 import { getProvider, type InboundMessage, type StatusUpdate, type EchoMessage } from '@wa/whatsapp';
-import { windowExpiryFrom, ensureOpenDeal, recordAdSource, autoAssignConversation, type InboundMessageJob } from '@wa/core';
+import { windowExpiryFrom, ensureOpenDeal, recordAdSource, autoAssignConversation, warmCatalog, type InboundMessageJob } from '@wa/core';
 import { scheduleAiReply } from '../queues.js';
 
 /**
@@ -228,6 +228,8 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
   // сообщение уже сохранено, менеджер его увидит.
   const config = await db.aIConfiguration.findFirst();
   if (conversation.mode === 'AI' && config?.enabled) {
+    // Пока бот ждёт, допишет ли клиент, — подтягиваем склад, чтобы ответ не ждал его.
+    if (config.catalogUrl.trim()) warmCatalog({ url: config.catalogUrl.trim() });
     try {
       await scheduleAiReply(
         { companyId: number.companyId, conversationId: conversation.id, inboundMessageId: saved.id },

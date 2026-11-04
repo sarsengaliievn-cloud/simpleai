@@ -5,7 +5,7 @@ import { buildSystemPrompt, type AIConfigLike } from './prompt.js';
 import type { ChatMessage } from './provider.js';
 import { understandMessage, type Understanding } from './understand.js';
 import {
-  loadCatalog, searchCatalog, catalogBlock, storesLine, describeItem, sizeAvailability, photoLink, productLink,
+  loadCatalog, searchCatalog, catalogBlock, storesLine, sizeAvailability, photoLink, productLink, shownProductIds,
   type Catalog, type CatalogMatch, type CatalogSource,
 } from '../catalog.js';
 
@@ -138,15 +138,22 @@ export async function answerQuestion(params: {
   let catalog: Catalog | null = null;
   let match: CatalogMatch | null = null;
   let catalogError: string | undefined;
-  const wantsCatalog = !!u && (['stock', 'pick', 'buy'].includes(u.intent) || !!u.article || !!u.model || !!u.size);
+  // Склад нужен, если клиент спрашивает о наличии, просит подобрать, берёт —
+  // или просто прислал карточку модели с сайта (ссылка, артикул).
+  const linksModel = /#p=|артикул|\bарт\.?\s*[\w-]{2,}/i.test(params.question)
+    || (!!params.catalog?.productUrl && params.catalog.productUrl.includes('{id}') && params.question.includes(params.catalog.productUrl.split('{id}')[0]!));
+  const wantsCatalog = linksModel || (!!u && (['stock', 'pick', 'buy'].includes(u.intent) || !!u.article || !!u.model || !!u.size));
   if (params.catalog?.url && wantsCatalog) {
     try {
       catalog = await loadCatalog(params.catalog);
       const context = [...history.map((m) => m.content), params.question].join('\n');
+      const shown = shownProductIds(history.filter((m) => m.role === 'assistant').map((m) => m.content), params.catalog.productUrl);
       match = searchCatalog(catalog, {
-        article: u!.article, model: u!.model, size: u!.size, gender: u!.gender, season: u!.season,
-        color: u!.color, maxPrice: u!.maxPrice, context,
+        article: u?.article, model: u?.model, size: u?.size, gender: u?.gender, season: u?.season,
+        color: u?.color, maxPrice: u?.maxPrice, context, exclude: shown, pick: u?.intent === 'pick',
       }, params.catalog.productUrl);
+      // Подбор показываем, только когда клиент о нём просил; карточка модели — всегда.
+      if (match.mode === 'pick' && u && !['stock', 'pick', 'buy'].includes(u.intent)) match = { ...match, mode: 'none', items: [] };
     } catch (error) {
       catalogError = (error as Error).message.slice(0, 200);
       console.warn('[ai] каталог недоступен:', catalogError);
@@ -202,12 +209,14 @@ export async function answerQuestion(params: {
     };
   }
 
+  // Склад — первым и главнее базы знаний: в базе может быть общее «смотрите
+  // каталог», а клиент спрашивает про конкретную модель, которая есть в блоке.
   const context = [
+    stock
+      ? `${stock}\n\nНаличие, размеры и цены бери только из блока КАТАЛОГ — это данные склада на сейчас, они важнее базы знаний. Называя модель, добавь её ссылку из каталога. Точное количество пар не называй.`
+      : '',
     relevant.length
       ? `Фрагменты базы знаний:\n\n${relevant.map((h, i) => `[${i + 1}] Источник: ${h.documentTitle}\n${h.content}`).join('\n\n---\n\n')}`
-      : '',
-    stock
-      ? `${stock}\n\nНаличие, размеры и цены бери только из блока КАТАЛОГ — это данные склада на сейчас. Называя модель, добавь её ссылку из каталога. Точное количество пар не называй.`
       : '',
   ].filter(Boolean).join('\n\n===\n\n');
 
