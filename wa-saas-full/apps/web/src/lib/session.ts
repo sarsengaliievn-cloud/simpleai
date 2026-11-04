@@ -31,6 +31,10 @@ export async function requireCompany(permission?: Permission) {
   if (permission && !can(role, permission)) redirect('/conversations');
 
   const own = seesOnlyOwn(role);
+  // Менеджер на смене и панель открыта — отмечаем, что он здесь (не чаще раза в минуту).
+  if (membership.onShift && (!membership.lastSeenAt || Date.now() - membership.lastSeenAt.getTime() > 60_000)) {
+    await prisma.membership.update({ where: { id: membership.id }, data: { lastSeenAt: new Date() } }).catch(() => {});
+  }
   // Сбой ИИ показываем плашкой в меню на всех страницах, пока бот снова не ответит.
   const health = await prisma.aIConfiguration.findUnique({
     where: { companyId: membership.companyId },
@@ -40,6 +44,12 @@ export async function requireCompany(permission?: Permission) {
     user,
     company: { ...membership.company, aiError: health?.lastErrorAt ? health.lastError ?? 'Ассистент не смог ответить' : null },
     role,
+    membership: {
+      id: membership.id,
+      onShift: membership.onShift,
+      shiftStartedAt: membership.shiftStartedAt,
+      lastSeenAt: membership.lastSeenAt,
+    },
     db: forCompany(prisma, membership.companyId),
     /** Фильтр «только свои» для диалогов и сделок; для владельца — пусто. */
     ownConversations: own ? { assigneeId: user.id } : {},

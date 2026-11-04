@@ -543,3 +543,62 @@ video.msg-media{max-height:360px}
 .file-chip-n{font-weight:600;font-size:13.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .msg-text{display:block;white-space:pre-wrap;overflow-wrap:anywhere}
 .msg-out .msg-file{background:rgba(255,255,255,.16);color:#fff}
+
+/* ── CRM: смены, зависшие, напоминания, повторные, реклама ── */
+.shift{margin:0 12px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 8px;background:var(--surface-2)}
+.shift.on{background:var(--pine-soft);border-color:transparent}
+.shift-t{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600}
+.shift-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.shift.on .shift-dot{background:var(--pine);box-shadow:0 0 0 3px rgba(11,110,79,.18)}
+.nav-badge-warn{background:var(--amber)}
+.switch-row{display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:14px;line-height:1.4}
+.switch-row input{width:18px;height:18px;margin-top:2px;accent-color:var(--pine);flex:none}
+
+.seg button{padding:5px 11px;font-size:13px;font-weight:600;color:var(--muted);border-radius:6px;background:none;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-family:inherit}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:var(--sh)}
+.seg-n{font-size:11px;font-weight:700;border-radius:999px;padding:0 6px;background:var(--line);color:var(--ink-2)}
+.seg button.has-bad .seg-n{background:var(--red);color:#fff}
+.deal-quick{height:38px;align-items:center}
+
+.kan-card.stale{border-left:3px solid var(--red)}
+.kan-card.due{border-left:3px solid var(--amber);background:linear-gradient(0deg,var(--amber-soft),var(--amber-soft))}
+.kan-stale{color:var(--red);font-weight:600}
+.kan-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.kan-tag{display:inline-flex;align-items:center;font-size:11px;font-weight:600;line-height:1;padding:3px 6px;border-radius:5px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.tag-repeat{background:var(--pine-soft);color:var(--pine-600)}
+.tag-ad{background:#EEF0FB;color:#3B4BA8}
+.tag-remind{background:var(--amber-soft);color:var(--amber)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .tag-ad{background:#1A1E33;color:#9AA6EA}}
+:root[data-theme="dark"] .tag-ad{background:#1A1E33;color:#9AA6EA}
+
+.stage-edit-list{max-width:760px}
+.stage-kind{max-width:250px;height:36px;flex:1}
+.stage-tools{margin-left:auto;align-items:center}
+.stage-notes{margin:10px 0 0 18px;list-style:disc;display:flex;flex-direction:column;gap:2px}
+.lost-edit{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+.reason-edit{gap:4px;padding-right:4px}
+.reason-edit button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:0 3px;border-radius:4px}
+.reason-edit button:hover{color:var(--red);background:var(--red-soft)}
+
+.purchases{list-style:none;display:flex;flex-direction:column;gap:6px}
+.purchases li{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:baseline}
+.purchases li .small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.remind{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:var(--r-sm);background:var(--surface-2);border:1px solid var(--line)}
+.remind.due{background:var(--amber-soft);border-color:transparent;color:var(--amber)}
+.remind.due .small{color:var(--ink-2)}
+@media(max-width:860px){
+  .stage-kind{max-width:none;flex-basis:100%}
+  .stage-tools{margin-left:0}
+  .deal-quick{width:100%}
+}
+.shift-t{white-space:nowrap}
+.shift .btn{margin-left:auto}
+@media(max-width:860px){
+  .stage-edit-list{gap:12px}
+  .stage-edit-list li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"dot name tools" ". kind kind";gap:6px 8px;align-items:center}
+  .stage-edit-list li .kan-dot{grid-area:dot}
+  .stage-edit-list li .input{grid-area:name;max-width:none;width:100%}
+  .stage-edit-list li .stage-kind,.stage-edit-list li .stage-role{grid-area:kind;flex-basis:auto}
+  .stage-edit-list li .stage-tools{grid-area:tools}
+  .stage-edit-list li .stage-tools .btn{padding-left:6px;padding-right:6px}
+}

@@ -1,12 +1,12 @@
 import Link from 'next/link';
-import { can } from '@wa/core';
+import { can, isStale, lostReasonsOf, onShiftNow, type StageKind } from '@wa/core';
 import { requireCompany } from '@/lib/session';
 import { Shell } from '@/components/Shell';
 import { Kanban, type KanbanCard } from '@/components/crm/Kanban';
 import { DealPanel } from '@/components/crm/DealPanel';
 import { StageEditor } from '@/components/crm/StageEditor';
 import { DealFilters } from '@/components/crm/DealFilters';
-import { loadDeal, loadMembers, loadStages } from '@/lib/crm';
+import { loadDeal, loadMembers, loadStages, purchaseCounts } from '@/lib/crm';
 import { money } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -14,12 +14,14 @@ export const dynamic = 'force-dynamic';
 /** Закрытые сделки (выдан, отказ) на доске — только свежие, иначе колонки распухают. */
 const CLOSED_DAYS = 30;
 
-type Props = { searchParams: Promise<{ id?: string; m?: string; q?: string; stages?: string }> };
+type Props = { searchParams: Promise<{ id?: string; m?: string; q?: string; f?: string; stages?: string }> };
 
 export default async function DealsPage({ searchParams }: Props) {
-  const { id, m = '', q = '', stages: editStages } = await searchParams;
+  const { id, m = '', q = '', f: rawFilter = '', stages: editStages } = await searchParams;
+  const filter = rawFilter === 'stale' || rawFilter === 'remind' ? rawFilter : '';
   const ctx = await requireCompany();
-  const { db, ownDeals, seesOnlyOwn, role } = ctx;
+  const { db, ownDeals, seesOnlyOwn, role, company } = ctx;
+  const lostReasons = lostReasonsOf(company);
   const canAssign = can(role, 'team:manage');
   const canEditStages = can(role, 'settings:manage');
 
@@ -53,11 +55,15 @@ export default async function DealsPage({ searchParams }: Props) {
     include: {
       customer: true,
       assignee: true,
-      conversation: { select: { unreadCount: true, mode: true } },
+      conversation: { select: { unreadCount: true, mode: true, lastMessageAt: true } },
     },
   });
 
-  const cards: KanbanCard[] = deals.map((d) => ({
+  const now = new Date();
+  const kindOf = new Map(stages.map((s) => [s.id, s.kind as StageKind]));
+  const bought = await purchaseCounts(db, deals.map((d) => d.customerId));
+
+  const allCards: KanbanCard[] = deals.map((d) => ({
     id: d.id,
     stageId: d.stageId,
     name: d.customer.name ?? `+${d.customer.waId}`,
@@ -68,7 +74,42 @@ export default async function DealsPage({ searchParams }: Props) {
     stageChangedAt: d.stageChangedAt,
     unread: d.conversation?.unreadCount ?? 0,
     botActive: d.conversation?.mode === 'AI',
+    stale: isStale(
+      {
+        stageKind: kindOf.get(d.stageId) ?? 'WORK',
+        stageChangedAt: d.stageChangedAt,
+        lastMessageAt: d.conversation?.lastMessageAt,
+        remindAt: d.remindAt,
+        botActive: d.conversation?.mode === 'AI',
+      },
+      company.staleHours,
+      now,
+    ),
+    lastActivity: new Date(Math.max(d.stageChangedAt.getTime(), d.conversation?.lastMessageAt?.getTime() ?? 0)),
+    remindAt: d.remindAt,
+    remindNote: d.remindNote,
+    // Покупки до этой сделки: сама сделка, если уже «Купил», не считается.
+    repeat: (bought.get(d.customerId) ?? 0) - (d.wonAt ? 1 : 0),
+    ad: d.source === 'ad' ? d.adHeadline || 'Реклама' : null,
   }));
+  const staleCount = allCards.filter((c) => c.stale).length;
+  const remindCount = allCards.filter((c) => c.remindAt).length;
+  const cards =
+    filter === 'stale' ? allCards.filter((c) => c.stale)
+    : filter === 'remind' ? allCards.filter((c) => c.remindAt).sort((a, b) => a.remindAt!.getTime() - b.remindAt!.getTime())
+    : allCards;
+
+  // Для редактора этапов: сколько сделок на каждом (все, не только свежие закрытые).
+  const counts = editStages && canEditStages
+    ? Object.fromEntries((await db.deal.groupBy({ by: ['stageId'], _count: { _all: true } })).map((r) => [r.stageId, r._count._all]))
+    : {};
+
+  // Кто сейчас на смене — владельцу видно, кому уйдёт следующий клиент.
+  const onShift = company.autoAssign && !seesOnlyOwn
+    ? (await db.membership.findMany({ where: { onShift: true }, include: { user: true } }))
+        .filter((x) => onShiftNow(x, now))
+        .map((x) => x.user.firstName || x.user.email)
+    : null;
 
   const openValue = deals
     .filter((d) => stages.find((s) => s.id === d.stageId)?.kind === 'ORDER')
@@ -76,7 +117,7 @@ export default async function DealsPage({ searchParams }: Props) {
 
   const selected = id && /^[0-9a-f-]{36}$/i.test(id) ? await loadDeal(db, { id, ...ownDeals }) : null;
   const params = (extra: Record<string, string>) => {
-    const sp = new URLSearchParams({ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...extra });
+    const sp = new URLSearchParams({ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...(filter ? { f: filter } : {}), ...extra });
     return `/deals${sp.size ? `?${sp}` : ''}`;
   };
 
@@ -101,11 +142,24 @@ export default async function DealsPage({ searchParams }: Props) {
       }
     >
       <div className="page deals-page">
-        {editStages && canEditStages && <StageEditor key={stages.map((s) => s.id + s.name).join('|')} stages={stages} />}
+        {editStages && canEditStages && (
+          <StageEditor
+            key={stages.map((s) => s.id + s.name + s.kind).join('|')}
+            stages={stages}
+            counts={counts}
+            lostReasons={lostReasons}
+            customReasons={(company.lostReasons ?? []).length > 0}
+          />
+        )}
 
-        <DealFilters members={members} manager={m} query={query} />
+        <DealFilters members={members} manager={m} query={query} filter={filter} staleCount={staleCount} remindCount={remindCount} staleHours={company.staleHours} />
+        {onShift && (
+          <p className="tiny muted" style={{ margin: '-4px 0 10px' }}>
+            {onShift.length ? `На смене: ${onShift.join(', ')} — новые клиенты уходят им по очереди` : 'На смене никого — новые клиенты ждут без менеджера'}
+          </p>
+        )}
 
-        {cards.length === 0 && !query && !m ? (
+        {allCards.length === 0 && !query && !m ? (
           <div className="empty">
             <h3>{seesOnlyOwn ? 'Вам пока не передали клиентов' : 'Сделок пока нет'}</h3>
             <p>
@@ -115,7 +169,7 @@ export default async function DealsPage({ searchParams }: Props) {
             </p>
           </div>
         ) : (
-          <Kanban stages={stages} cards={cards} linkParams={{ ...(m ? { m } : {}), ...(query ? { q: query } : {}) }} />
+          <Kanban stages={stages} cards={cards} lostReasons={lostReasons} linkParams={{ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...(filter ? { f: filter } : {}) }} />
         )}
       </div>
 
@@ -126,7 +180,7 @@ export default async function DealsPage({ searchParams }: Props) {
             <div className="drawer-close">
               <Link href={params({})} className="btn btn-quiet btn-sm">Закрыть</Link>
             </div>
-            <DealPanel key={selected.id} deal={selected} stages={stages} members={members} showDialogLink />
+            <DealPanel key={selected.id} deal={selected} stages={stages} members={members} lostReasons={lostReasons} showDialogLink />
           </aside>
         </>
       )}

@@ -46,7 +46,21 @@ export interface InboundMessage {
   mediaMimeType?: string;
   /** Имя файла у документа. */
   fileName?: string;
+  /** Клиент пришёл с рекламы «Написать в WhatsApp» (Click-to-WhatsApp). */
+  referral?: AdReferral;
   timestamp: Date;
+}
+
+/** Откуда пришёл клиент: объявление или пост, по которому он нажал «Написать». */
+export interface AdReferral {
+  /** ad — объявление, post — публикация. */
+  sourceType?: string;
+  sourceId?: string;
+  sourceUrl?: string;
+  /** Заголовок объявления — по нему владелец узнаёт рекламу. */
+  headline?: string;
+  body?: string;
+  ctwaClid?: string;
 }
 
 /**

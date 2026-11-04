@@ -1,4 +1,5 @@
 import { requireCompany } from '@/lib/session';
+import { sidebarExtras } from '@/lib/sidebar';
 import { Sidebar } from '@/components/Sidebar';
 import { isSuperAdmin } from '@/lib/admin';
 import { Playground } from '@/components/Playground';
@@ -6,13 +7,15 @@ import { Playground } from '@/components/Playground';
 export const dynamic = 'force-dynamic';
 
 export default async function PlaygroundPage() {
-  const { company, db, user, role } = await requireCompany('ai:manage');
+  const ctx = await requireCompany('ai:manage');
+  const { company, db, user, role } = ctx;
+  const extras = await sidebarExtras(ctx);
   const config = await db.aIConfiguration.findFirst();
   const docs = await db.knowledgeDocument.count({ where: { status: 'READY' } });
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} {...extras} />
       <div className="main">
         <header className="top">
           <div className="top-t"><h1>Тестовый чат</h1><p className="top-hint">Задайте вопрос как клиент и посмотрите, что ответит бот</p></div>

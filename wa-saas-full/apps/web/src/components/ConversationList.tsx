@@ -15,6 +15,10 @@ type Item = {
   status: 'OPEN' | 'PENDING' | 'CLOSED';
   stage: { name: string; kind: string } | null;
   assignee: string | null;
+  /** Сколько раз покупал раньше — повторный клиент. */
+  repeat?: number;
+  /** Пришёл с рекламы. */
+  ad?: boolean;
 };
 
 const FILTERS: Array<[string, string]> = [
@@ -114,6 +118,8 @@ export function ConversationList({
                 {c.stage && (
                   <span className={`stage-chip k-${c.stage.kind.toLowerCase()}`}>{c.stage.name}</span>
                 )}
+                {c.repeat ? <span className="kan-tag tag-repeat" title="Уже покупал у вас">↻ повторный</span> : null}
+                {c.ad ? <span className="kan-tag tag-ad">реклама</span> : null}
                 <span className="tiny muted">
                   {c.status === 'CLOSED' ? 'закрыт' : c.mode === 'AI' ? 'отвечает бот' : c.assignee ? c.assignee : 'ждёт менеджера'}
                 </span>

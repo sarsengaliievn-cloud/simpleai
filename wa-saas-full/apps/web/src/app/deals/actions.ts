@@ -1,7 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { assignDeal, moveDeal, parseAmount, ensureOpenDeal, CrmError } from '@wa/core';
+import { prisma } from '@wa/db';
+import { assignDeal, moveDeal, parseAmount, ensureOpenDeal, saveStages, cleanLostReasons, CrmError, type StageDraft } from '@wa/core';
 import { requireCompany } from '@/lib/session';
 
 export type DealResult = { ok: true } | { ok: false; error: string };
@@ -111,59 +112,47 @@ export async function addDealNoteAction(dealId: string, text: string): Promise<D
 
 /* ── Этапы воронки ─────────────────────────────────────────── */
 
-export async function renameStageAction(stageId: string, name: string): Promise<DealResult> {
+/** Сохранить этапы целиком: названия, типы, порядок, новые и удалённые. */
+export async function saveStagesAction(draft: StageDraft[]): Promise<DealResult> {
   const ctx = await requireCompany('settings:manage');
-  const clean = name.trim().slice(0, 40);
-  if (!clean) return { ok: false, error: 'Название не может быть пустым' };
-  await ctx.db.pipelineStage.updateMany({ where: { id: stageId }, data: { name: clean } });
-  refresh();
-  return { ok: true };
-}
-
-/** Свой этап «в работе» — встаёт перед «Новый заказ». */
-export async function addStageAction(name: string): Promise<DealResult> {
-  const ctx = await requireCompany('settings:manage');
-  const clean = name.trim().slice(0, 40);
-  if (!clean) return { ok: false, error: 'Введите название этапа' };
-  const stages = await ctx.db.pipelineStage.findMany({ orderBy: { position: 'asc' } });
-  if (stages.length >= 12) return { ok: false, error: 'Больше 12 этапов — воронку трудно читать' };
-  const order = stages.find((s) => s.kind === 'ORDER');
-  const at = order ? order.position : stages.length;
-  // Сдвигаем всё, что после, на одну позицию.
-  for (const s of stages.filter((x) => x.position >= at).reverse()) {
-    await ctx.db.pipelineStage.updateMany({ where: { id: s.id }, data: { position: s.position + 1 } });
+  if (!Array.isArray(draft)) return { ok: false, error: 'Пустой список этапов' };
+  const kinds = new Set(['NEW', 'WORK', 'ORDER', 'WON', 'LOST']);
+  const clean = draft
+    .filter((s) => s && typeof s.name === 'string' && kinds.has(s.kind))
+    .map((s) => ({ id: typeof s.id === 'string' ? s.id : null, name: s.name.slice(0, 60), kind: s.kind }));
+  try {
+    await saveStages(ctx.db, clean);
+  } catch (error) {
+    return fail(error);
   }
-  await ctx.db.pipelineStage.create({ data: { name: clean, kind: 'WORK', position: at } as never });
   refresh();
   return { ok: true };
 }
 
-/** Удалить можно только свой этап «в работе»; его сделки уходят на соседний. */
-export async function deleteStageAction(stageId: string): Promise<DealResult> {
+/** Свой список причин отказа. Пустой — вернуть стандартный. */
+export async function saveLostReasonsAction(list: string[]): Promise<DealResult> {
   const ctx = await requireCompany('settings:manage');
-  const stages = await ctx.db.pipelineStage.findMany({ orderBy: { position: 'asc' } });
-  const stage = stages.find((s) => s.id === stageId);
-  if (!stage) return { ok: false, error: 'Этап не найден' };
-  const work = stages.filter((s) => s.kind === 'WORK');
-  if (stage.kind !== 'WORK') return { ok: false, error: 'Этот этап нужен для подсчёта конверсии — его можно только переименовать' };
-  if (work.length <= 1) return { ok: false, error: 'Нужен хотя бы один этап «в работе»' };
-
-  const target = work.find((s) => s.id !== stage.id)!;
-  await ctx.db.deal.updateMany({ where: { stageId: stage.id }, data: { stageId: target.id } });
-  await ctx.db.pipelineStage.deleteMany({ where: { id: stage.id } });
+  const clean = cleanLostReasons(Array.isArray(list) ? list.map(String) : []);
+  await prisma.company.update({ where: { id: ctx.company.id }, data: { lostReasons: clean } });
   refresh();
   return { ok: true };
 }
 
-/** Сдвиг своего этапа влево или вправо — только среди этапов «в работе». */
-export async function shiftStageAction(stageId: string, dir: -1 | 1): Promise<DealResult> {
-  const ctx = await requireCompany('settings:manage');
-  const stages = await ctx.db.pipelineStage.findMany({ orderBy: { position: 'asc' } });
-  const i = stages.findIndex((s) => s.id === stageId);
-  const other = stages[i + dir];
-  if (i < 0 || !other || stages[i]!.kind !== 'WORK' || other.kind !== 'WORK') return { ok: true };
-  await ctx.db.pipelineStage.updateMany({ where: { id: stages[i]!.id }, data: { position: other.position } });
-  await ctx.db.pipelineStage.updateMany({ where: { id: other.id }, data: { position: stages[i]!.position } });
+/** Напомнить о клиенте: дата и о чём. at — ISO-время или пусто, чтобы снять. */
+export async function setReminderAction(dealId: string, at: string | null, note: string): Promise<DealResult> {
+  const { ctx, deal } = await ownDeal(dealId);
+  if (!deal) return { ok: false, error: 'Сделка не найдена' };
+  const when = at ? new Date(at) : null;
+  if (at && (!when || Number.isNaN(when.getTime()))) return { ok: false, error: 'Не понял дату напоминания' };
+  if (when && when.getTime() > Date.now() + 366 * 24 * 3600_000) return { ok: false, error: 'Напоминание — не дальше чем через год' };
+  const text = note.trim().slice(0, 300) || null;
+  await ctx.db.deal.updateMany({ where: { id: dealId }, data: { remindAt: when, remindNote: when ? text : null } });
+  if (when) {
+    const label = when.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: ctx.company.timezone || 'Asia/Almaty' });
+    await ctx.db.dealEvent.create({
+      data: { dealId, actorUserId: ctx.user.id, type: 'note', text: `Напоминание на ${label}${text ? `: ${text}` : ''}` } as never,
+    });
+  }
   refresh();
   return { ok: true };
 }

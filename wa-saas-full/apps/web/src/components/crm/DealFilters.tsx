@@ -4,17 +4,38 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { MemberView } from '@/lib/crm';
 
-/** Поиск клиента и фильтр по менеджеру. Менеджеру фильтр не нужен — он видит только своих. */
-export function DealFilters({ members, manager, query }: { members: MemberView[] | null; manager: string; query: string }) {
+/**
+ * Поиск клиента, фильтр по менеджеру (менеджеру не нужен — он видит только
+ * своих) и быстрые списки: зависшие клиенты и напоминания.
+ */
+export function DealFilters({
+  members,
+  manager,
+  query,
+  filter = '',
+  staleCount = 0,
+  remindCount = 0,
+  staleHours = 24,
+}: {
+  members: MemberView[] | null;
+  manager: string;
+  query: string;
+  filter?: string;
+  staleCount?: number;
+  remindCount?: number;
+  staleHours?: number;
+}) {
   const router = useRouter();
   const [q, setQ] = useState(query);
 
-  const go = (next: { m?: string; q?: string }) => {
+  const go = (next: { m?: string; q?: string; f?: string }) => {
     const sp = new URLSearchParams();
     const m = next.m ?? manager;
     const qq = next.q ?? query;
+    const f = next.f ?? filter;
     if (m) sp.set('m', m);
     if (qq) sp.set('q', qq);
+    if (f) sp.set('f', f);
     router.replace(`/deals${sp.size ? `?${sp}` : ''}`);
   };
 
@@ -36,6 +57,20 @@ export function DealFilters({ members, manager, query }: { members: MemberView[]
           {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
       )}
+      <div className="seg deal-quick" role="group" aria-label="Быстрый список">
+        <button type="button" className={filter === '' ? 'on' : ''} onClick={() => go({ f: '' })}>Все</button>
+        <button
+          type="button"
+          className={`${filter === 'stale' ? 'on' : ''} ${staleCount ? 'has-bad' : ''}`}
+          title={`Без движения больше ${staleHours} ч: ни этап, ни переписка`}
+          onClick={() => go({ f: 'stale' })}
+        >
+          Зависшие{staleCount ? <span className="seg-n">{staleCount}</span> : null}
+        </button>
+        <button type="button" className={`${filter === 'remind' ? 'on' : ''}`} onClick={() => go({ f: 'remind' })}>
+          Напоминания{remindCount ? <span className="seg-n">{remindCount}</span> : null}
+        </button>
+      </div>
     </div>
   );
 }

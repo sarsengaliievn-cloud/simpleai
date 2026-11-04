@@ -1,5 +1,5 @@
 import type { TenantClient } from '@wa/db';
-import { ensureStages } from '@wa/core';
+import { ensureStages, sourceLabel } from '@wa/core';
 
 export type StageView = { id: string; name: string; kind: 'NEW' | 'WORK' | 'ORDER' | 'WON' | 'LOST' };
 export type MemberView = { id: string; name: string };
@@ -15,6 +15,13 @@ export type DealView = {
   conversationId: string | null;
   createdAt: Date;
   stageChangedAt: Date;
+  remindAt: Date | null;
+  remindNote: string | null;
+  /** Откуда пришёл: «WhatsApp напрямую» или заголовок рекламы. */
+  source: string;
+  adUrl: string | null;
+  /** Прошлые покупки этого клиента — повторный клиент. */
+  purchases: Array<{ id: string; amount: number | null; product: string | null; at: Date }>;
   customer: { id: string; name: string; phone: string; city: string | null };
   events: Array<{ id: string; type: string; text: string; createdAt: Date; actor: string | null }>;
 };
@@ -45,6 +52,12 @@ export async function loadDeal(db: TenantClient, where: Record<string, unknown>)
     },
   });
   if (!deal) return null;
+  const purchases = await db.deal.findMany({
+    where: { customerId: deal.customerId, wonAt: { not: null }, id: { not: deal.id } },
+    orderBy: { wonAt: 'desc' },
+    take: 10,
+    select: { id: true, amount: true, product: true, wonAt: true },
+  });
   return {
     id: deal.id,
     stageId: deal.stageId,
@@ -57,6 +70,11 @@ export async function loadDeal(db: TenantClient, where: Record<string, unknown>)
     conversationId: deal.conversationId,
     createdAt: deal.createdAt,
     stageChangedAt: deal.stageChangedAt,
+    remindAt: deal.remindAt,
+    remindNote: deal.remindNote,
+    source: sourceLabel(deal),
+    adUrl: deal.adSourceUrl,
+    purchases: purchases.map((p) => ({ id: p.id, amount: p.amount, product: p.product, at: p.wonAt! })),
     customer: {
       id: deal.customer.id,
       name: deal.customer.name ?? `+${deal.customer.waId}`,
@@ -65,4 +83,15 @@ export async function loadDeal(db: TenantClient, where: Record<string, unknown>)
     },
     events: deal.events.map((e) => ({ id: e.id, type: e.type, text: e.text, createdAt: e.createdAt, actor: fullName(e.actor) })),
   };
+}
+
+/** Сколько покупок было у каждого клиента — для отметки «повторный». */
+export async function purchaseCounts(db: TenantClient, customerIds: string[]) {
+  if (customerIds.length === 0) return new Map<string, number>();
+  const rows = await db.deal.groupBy({
+    by: ['customerId'],
+    where: { customerId: { in: [...new Set(customerIds)] }, wonAt: { not: null } },
+    _count: { _all: true },
+  });
+  return new Map(rows.map((r) => [r.customerId, r._count._all]));
 }

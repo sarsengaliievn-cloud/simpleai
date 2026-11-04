@@ -1,4 +1,5 @@
 import { requireCompany } from '@/lib/session';
+import { sidebarExtras } from '@/lib/sidebar';
 import { Sidebar } from '@/components/Sidebar';
 import { isSuperAdmin } from '@/lib/admin';
 import { saveCompany, addQuickReply, deleteQuickReply } from './actions';
@@ -14,7 +15,9 @@ const ACTIONS: Record<string, string> = {
 };
 
 export default async function SettingsPage() {
-  const { company, db, user, role } = await requireCompany('settings:manage');
+  const ctx = await requireCompany('settings:manage');
+  const { company, db, user, role } = ctx;
+  const extras = await sidebarExtras(ctx);
 
   const [logs, quick] = await Promise.all([
     db.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 30 }),
@@ -23,7 +26,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} {...extras} />
       <div className="main">
         <header className="top"><div className="top-t"><h1>Настройки</h1><p className="top-hint">Данные компании и журнал изменений</p></div></header>
 

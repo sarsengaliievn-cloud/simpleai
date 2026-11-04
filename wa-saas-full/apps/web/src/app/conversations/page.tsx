@@ -1,4 +1,4 @@
-import { can } from '@wa/core';
+import { can, lostReasonsOf } from '@wa/core';
 import { isWindowOpen } from '@wa/core';
 import { requireCompany } from '@/lib/session';
 import { Shell } from '@/components/Shell';
@@ -6,7 +6,7 @@ import { ConversationList } from '@/components/ConversationList';
 import { ThreadView } from '@/components/ThreadView';
 import { DealPanel } from '@/components/crm/DealPanel';
 import { StartDeal } from '@/components/crm/StartDeal';
-import { loadDeal, loadMembers, loadStages } from '@/lib/crm';
+import { loadDeal, loadMembers, loadStages, purchaseCounts } from '@/lib/crm';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +58,8 @@ export default async function ConversationsPage({ searchParams }: Props) {
     },
   });
 
+  const bought = await purchaseCounts(db, conversations.map((c) => c.customerId));
+
   // Мусор в ?id= (старая ссылка, «undefined») раньше ронял страницу ошибкой базы.
   const validId = id && /^[0-9a-f-]{36}$/i.test(id) ? id : undefined;
   const activeId = validId ?? conversations[0]?.id ?? null;
@@ -104,6 +106,8 @@ export default async function ConversationsPage({ searchParams }: Props) {
             status: c.status,
             stage: c.deals[0] ? { name: c.deals[0].stage.name, kind: c.deals[0].stage.kind } : null,
             assignee: c.assignee ? c.assignee.firstName : null,
+            repeat: (bought.get(c.customerId) ?? 0) - (c.deals[0]?.wonAt ? 1 : 0),
+            ad: c.deals[0]?.source === 'ad',
           }))}
         />
 
@@ -149,7 +153,7 @@ export default async function ConversationsPage({ searchParams }: Props) {
         {active && (
           <aside className="ctx">
             {deal ? (
-              <DealPanel key={deal.id} deal={deal} stages={stages} members={members} />
+              <DealPanel key={deal.id} deal={deal} stages={stages} members={members} lostReasons={lostReasonsOf(ctx.company)} />
             ) : (
               <StartDeal conversationId={active.id} />
             )}

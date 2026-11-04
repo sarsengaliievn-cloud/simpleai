@@ -97,6 +97,12 @@ model Company {
   /// Без внутреннего баланса: за ИИ платит владелец платформы напрямую провайдеру.
   /// Расход считается для статистики, но не списывается, и бот не останавливается.
   billingExempt Boolean @default(false)
+  /// Свои причины отказа. Пусто — стандартный список.
+  lostReasons   String[] @default([])
+  /// Новые клиенты от бота — по очереди менеджерам на смене.
+  autoAssign    Boolean  @default(false)
+  /// Через сколько часов без движения клиент считается зависшим.
+  staleHours    Int      @default(24)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -127,6 +133,13 @@ model Membership {
   userId    String   @db.Uuid
   companyId String   @db.Uuid
   role      Role
+  /// Смена: менеджер нажал «Начать смену». Клиентов получает, только пока
+  /// панель открыта (lastSeenAt свежий) — закрыл вкладку, очередь его пропускает.
+  onShift        Boolean   @default(false)
+  shiftStartedAt DateTime?
+  lastSeenAt     DateTime?
+  /// Когда последний раз получил клиента автоматически — для очереди.
+  lastAssignedAt DateTime?
   createdAt DateTime @default(now())
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -550,8 +563,16 @@ model Deal {
   product        String?
   comment        String?
   lostReason     String?
-  /// Откуда пришёл клиент: whatsapp, позже — объявление.
+  /// Откуда пришёл клиент: whatsapp или ad (реклама «Написать в WhatsApp»).
   source         String    @default("whatsapp")
+  /// Реклама, с которой пришёл клиент.
+  adHeadline     String?
+  adSourceId     String?
+  adSourceUrl    String?
+  adSourceType   String?
+  /// Напоминание менеджеру: когда и о чём.
+  remindAt       DateTime?
+  remindNote     String?
   stageChangedAt DateTime  @default(now())
   /// Даты ключевых событий — по ним считается конверсия за период.
   assignedAt     DateTime?
@@ -572,6 +593,7 @@ model Deal {
   @@index([companyId, assigneeId])
   @@index([companyId, createdAt])
   @@index([companyId, customerId])
+  @@index([companyId, remindAt])
   @@map("deals")
 }
 

@@ -1,6 +1,7 @@
 import { aiLabel, resolveAI, MODELS, providerAvailable, billingSettings, costUsd, chargeTiyn, formatTiyn } from '@wa/core';
 import { ModelPicker, type ModelOption } from '@/components/ModelPicker';
 import { requireCompany } from '@/lib/session';
+import { sidebarExtras } from '@/lib/sidebar';
 import { Sidebar } from '@/components/Sidebar';
 import { isSuperAdmin } from '@/lib/admin';
 import { buildSystemPrompt } from '@wa/core';
@@ -16,7 +17,9 @@ type Props = { searchParams: Promise<{ saved?: string }> };
 
 export default async function AssistantPage({ searchParams }: Props) {
   const { saved } = await searchParams;
-  const { company, db, user, role } = await requireCompany('ai:manage');
+  const ctx = await requireCompany('ai:manage');
+  const { company, db, user, role } = ctx;
+  const extras = await sidebarExtras(ctx);
 
   const config = (await db.aIConfiguration.findFirst()) ?? {
     enabled: false, model: 'claude-sonnet-4-6', role: `Консультант компании «${company.name}»`,
@@ -46,7 +49,7 @@ export default async function AssistantPage({ searchParams }: Props) {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} {...extras} />
       <div className="main">
         <header className="top">
           <div className="top-t"><h1>Как отвечает ассистент</h1><p className="top-hint">Как бот разговаривает с клиентами: тон, правила, рабочие часы</p></div>

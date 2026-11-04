@@ -2,21 +2,24 @@
 
 import { useState } from 'react';
 
-export const LOST_REASONS = ['Дорого', 'Нет размера или модели', 'Купил в другом месте', 'Не отвечает', 'Передумал'];
-
-/** Новый заказ: сумма и товар обязательны — без них не посчитать выручку. */
+/**
+ * Новый заказ: сумма и товар обязательны — без них не посчитать выручку.
+ * optional — для «Купил» без оформленного заказа: сумму лучше указать, но можно пропустить.
+ */
 export function OrderForm({
   initial,
   pending,
   onSubmit,
   onCancel,
   submitLabel = 'Оформить заказ',
+  optional = false,
 }: {
   initial?: { amount?: number | null; product?: string | null; comment?: string | null };
   pending?: boolean;
   onSubmit: (v: { amount: string; product: string; comment: string }) => void;
   onCancel: () => void;
   submitLabel?: string;
+  optional?: boolean;
 }) {
   const [amount, setAmount] = useState(initial?.amount ? String(initial.amount) : '');
   const [product, setProduct] = useState(initial?.product ?? '');
@@ -32,16 +35,17 @@ export function OrderForm({
     >
       <label className="field">
         <span className="label">Сумма, ₸</span>
-        <input className="input" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="25 000" required autoFocus />
+        <input className="input" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="25 000" required={!optional} autoFocus />
       </label>
       <label className="field">
         <span className="label">Товар</span>
-        <input className="input" value={product} onChange={(e) => setProduct(e.target.value)} placeholder="Модель, размер, цвет" required />
+        <input className="input" value={product} onChange={(e) => setProduct(e.target.value)} placeholder="Модель, размер, цвет" required={!optional} />
       </label>
       <label className="field">
         <span className="label">Комментарий</span>
         <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Доставка, оплата — по желанию" />
       </label>
+      {optional && <p className="tiny muted" style={{ margin: '-4px 0 10px' }}>Сумма попадёт в выручку в аналитике. Не знаете — оставьте пустым.</p>}
       <div className="row">
         <button className="btn btn-primary btn-sm" type="submit" disabled={pending}>{pending ? 'Сохраняю…' : submitLabel}</button>
         <button className="btn btn-quiet btn-sm" type="button" onClick={onCancel}>Отмена</button>
@@ -52,10 +56,13 @@ export function OrderForm({
 
 /** Отказ: причина нужна, чтобы потом видеть, на чём теряются клиенты. */
 export function LostForm({
+  reasons,
   pending,
   onSubmit,
   onCancel,
 }: {
+  /** Причины компании — свои или стандартные. */
+  reasons: string[];
   pending?: boolean;
   onSubmit: (reason: string) => void;
   onCancel: () => void;
@@ -71,7 +78,7 @@ export function LostForm({
     >
       <span className="label">Почему отказался</span>
       <div className="reason-chips">
-        {LOST_REASONS.map((r) => (
+        {reasons.map((r) => (
           <button key={r} type="button" className={`chip chip-btn ${reason === r ? 'chip-on' : ''}`} onClick={() => setReason(r)}>
             {r}
           </button>

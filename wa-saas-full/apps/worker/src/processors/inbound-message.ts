@@ -1,6 +1,6 @@
 import { prisma, forCompany } from '@wa/db';
 import { getProvider, type InboundMessage, type StatusUpdate, type EchoMessage } from '@wa/whatsapp';
-import { windowExpiryFrom, ensureOpenDeal, type InboundMessageJob } from '@wa/core';
+import { windowExpiryFrom, ensureOpenDeal, recordAdSource, autoAssignConversation, type InboundMessageJob } from '@wa/core';
 import { scheduleAiReply } from '../queues.js';
 
 /**
@@ -177,7 +177,9 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
 
   // Сделка в CRM заводится сама: до сохранения сообщения, чтобы повтор
   // задачи (сообщение уже есть — выходим раньше) её не пропустил.
-  await ensureOpenDeal(db, { customerId: customer.id, conversationId: conversation.id, at: inbound.timestamp });
+  const deal = await ensureOpenDeal(db, { customerId: customer.id, conversationId: conversation.id, at: inbound.timestamp });
+  // Пришёл с рекламы «Написать в WhatsApp» — видно, какое объявление приводит клиентов.
+  if (deal && inbound.referral) await recordAdSource(db, deal.id, inbound.referral);
 
   let saved: { id: string };
   try {
@@ -234,6 +236,12 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
     } catch (error) {
       console.error('[ai] не удалось поставить ответ в очередь:', (error as Error).message);
     }
+  } else {
+    // Бот не отвечает — клиента сразу получает менеджер на смене (если
+    // включено авто-распределение и клиент ещё ни за кем не закреплён).
+    await autoAssignConversation(db, { companyId: number.companyId, conversationId: conversation.id }).catch((error) =>
+      console.error('[crm] авто-распределение:', (error as Error).message),
+    );
   }
 
   return number.companyId;

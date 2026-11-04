@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { funnel } from '@wa/core';
+import { funnel, isStale, sourceLabel, type StageKind } from '@wa/core';
 import { requireCompany } from '@/lib/session';
 import { Shell } from '@/components/Shell';
 import { DayBars } from '@/components/DayBars';
@@ -33,7 +33,7 @@ export default async function AnalyticsPage({ searchParams }: Props) {
     },
     select: {
       createdAt: true, assignedAt: true, orderedAt: true, wonAt: true, lostAt: true,
-      amount: true, lostReason: true, assigneeId: true,
+      amount: true, lostReason: true, assigneeId: true, source: true, adHeadline: true,
       assignee: { select: { firstName: true, lastName: true } },
     },
   });
@@ -69,19 +69,66 @@ export default async function AnalyticsPage({ searchParams }: Props) {
   const median = waits.length ? waits[Math.floor(waits.length / 2)]! : null;
   const medianLabel = median === null ? '—' : median < 2 * 3600_000 ? `${Math.max(1, Math.round(median / 60000))} мин` : median < 2 * DAY ? `${Math.round(median / 3600_000)} ч` : `${Math.round(median / DAY)} дн`;
 
+  // Откуда клиенты: напрямую в WhatsApp или с конкретной рекламы.
+  const bySource = new Map<string, { label: string; ad: boolean; created: number; ordered: number; revenue: number }>();
+  for (const x of deals) {
+    const label = sourceLabel(x);
+    const row = bySource.get(label) ?? { label, ad: x.source === 'ad', created: 0, ordered: 0, revenue: 0 };
+    if (x.createdAt >= from) row.created += 1;
+    if (x.orderedAt && x.orderedAt >= from) {
+      row.ordered += 1;
+      row.revenue += x.amount ?? 0;
+    }
+    bySource.set(label, row);
+  }
+  const sources = [...bySource.values()].filter((r) => r.created || r.ordered).sort((a, b) => b.created - a.created);
+
+  // Зависшие прямо сейчас — по менеджерам: у кого клиенты без движения.
+  const openDeals = seesOnlyOwn
+    ? []
+    : await db.deal.findMany({
+        where: { assigneeId: { not: null }, stage: { kind: { notIn: ['WON', 'LOST'] } } },
+        select: {
+          assigneeId: true, stageChangedAt: true, remindAt: true,
+          stage: { select: { kind: true } },
+          conversation: { select: { lastMessageAt: true, mode: true } },
+          assignee: { select: { firstName: true, lastName: true } },
+        },
+      });
+
   // По менеджерам: сколько получил, сколько довёл до заказа.
-  const byManager = new Map<string, { name: string; assigned: number; ordered: number; revenue: number }>();
+  const byManager = new Map<string, { name: string; assigned: number; ordered: number; revenue: number; stale: number }>();
   for (const x of deals) {
     if (!x.assigneeId) continue;
     const row = byManager.get(x.assigneeId) ?? {
       name: x.assignee ? `${x.assignee.firstName} ${x.assignee.lastName}`.trim() : 'Без имени',
-      assigned: 0, ordered: 0, revenue: 0,
+      assigned: 0, ordered: 0, revenue: 0, stale: 0,
     };
     if (x.assignedAt && x.assignedAt >= from) row.assigned += 1;
     if (x.orderedAt && x.orderedAt >= from) {
       row.ordered += 1;
       row.revenue += x.amount ?? 0;
     }
+    byManager.set(x.assigneeId, row);
+  }
+  for (const x of openDeals) {
+    const stale = isStale(
+      {
+        stageKind: x.stage.kind as StageKind,
+        stageChangedAt: x.stageChangedAt,
+        lastMessageAt: x.conversation?.lastMessageAt,
+        remindAt: x.remindAt,
+        botActive: x.conversation?.mode === 'AI',
+      },
+      company.staleHours,
+      to,
+    );
+    if (!stale || !x.assigneeId) continue;
+    const row = byManager.get(x.assigneeId) ?? {
+      name: x.assignee ? `${x.assignee.firstName} ${x.assignee.lastName}`.trim() : 'Без имени',
+      assigned: 0, ordered: 0, revenue: 0, stale: 0,
+    };
+    row.stale += 1;
     byManager.set(x.assigneeId, row);
   }
   const managers = [...byManager.values()].sort((a, b) => b.revenue - a.revenue);
@@ -98,8 +145,8 @@ export default async function AnalyticsPage({ searchParams }: Props) {
   const steps: Array<{ label: string; value: number; hint: string }> = [
     { label: 'Обращения', value: f.created, hint: 'клиент написал' },
     { label: 'Переданы менеджеру', value: f.assigned, hint: 'вы передали клиента' },
-    { label: 'Заказы', value: f.ordered, hint: 'отмечен «Новый заказ»' },
-    { label: 'Выданы', value: f.won, hint: 'заказ выдан или оплачен' },
+    { label: 'Заказы', value: f.ordered, hint: 'этап с типом «Заказ» или «Купил»' },
+    { label: 'Купили', value: f.won, hint: 'этап с типом «Купил»' },
   ];
   const top = Math.max(1, ...steps.map((s) => s.value));
   const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—');
@@ -129,7 +176,7 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           <div className="kpi">
             <div className="kpi-l">Заказов</div>
             <div className="kpi-v">{f.ordered}</div>
-            <div className="kpi-d muted">{f.won ? `${f.won} уже выдано` : 'отмечено «Новый заказ»'}</div>
+            <div className="kpi-d muted">{f.won ? `${f.won} уже купили` : 'заказ или «Купил»'}</div>
           </div>
           <div className="kpi kpi-accent">
             <div className="kpi-l">Конверсия в заказ</div>
@@ -189,6 +236,36 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           </section>
         </div>
 
+        <section className="card" style={{ overflowX: 'auto', marginBottom: 18 }}>
+          <div className="card-p" style={{ paddingBottom: 0 }}>
+            <h2 className="card-t">Откуда клиенты</h2>
+            <p className="tiny muted">
+              Реклама «Написать в WhatsApp» в Instagram и Facebook определяется сама — по объявлению, с которого клиент нажал кнопку.
+            </p>
+          </div>
+          {sources.length === 0 ? (
+            <p className="small muted card-p">За период обращений не было.</p>
+          ) : (
+            <table>
+              <thead><tr><th>Источник</th><th className="num">Обращений</th><th className="num">Заказов</th><th className="num">Конверсия</th><th className="num">Выручка</th></tr></thead>
+              <tbody>
+                {sources.map((r) => (
+                  <tr key={r.label}>
+                    <td style={{ fontWeight: 600 }}>
+                      {r.ad && <span className="kan-tag tag-ad" style={{ marginRight: 6 }}>реклама</span>}
+                      {r.label}
+                    </td>
+                    <td className="num">{r.created}</td>
+                    <td className="num">{r.ordered}</td>
+                    <td className="num">{pct(r.ordered, r.created)}</td>
+                    <td className="num nowrap">{money(r.revenue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+
         <div className="an-grid">
           <section className="card card-p">
             <h2 className="card-t">Обращения по дням</h2>
@@ -208,7 +285,7 @@ export default async function AnalyticsPage({ searchParams }: Props) {
                 <p className="small muted card-p">Пока никому не передавали клиентов. Передать можно в карточке сделки.</p>
               ) : (
                 <table>
-                  <thead><tr><th>Менеджер</th><th className="num">Получил</th><th className="num">Заказов</th><th className="num">Конверсия</th><th className="num">Выручка</th></tr></thead>
+                  <thead><tr><th>Менеджер</th><th className="num">Получил</th><th className="num">Заказов</th><th className="num">Конверсия</th><th className="num">Выручка</th><th className="num" title={`Клиенты без движения больше ${company.staleHours} ч — сейчас`}>Зависли</th></tr></thead>
                   <tbody>
                     {managers.map((m) => (
                       <tr key={m.name}>
@@ -217,6 +294,9 @@ export default async function AnalyticsPage({ searchParams }: Props) {
                         <td className="num">{m.ordered}</td>
                         <td className="num">{pct(m.ordered, m.assigned)}</td>
                         <td className="num nowrap">{money(m.revenue)}</td>
+                        <td className={`num ${m.stale ? 'danger' : 'muted'}`}>
+                          {m.stale ? <Link href="/deals?f=stale" className="danger">{m.stale}</Link> : 0}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

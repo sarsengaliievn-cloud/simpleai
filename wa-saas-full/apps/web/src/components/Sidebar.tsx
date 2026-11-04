@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { logout } from '@/app/login/actions';
 import { Icon, type IconName } from './Icon';
 import { tiyn } from '@/lib/format';
+import { ShiftToggle } from './ShiftToggle';
 
 type Role = 'OWNER' | 'ADMIN' | 'MANAGER' | 'OPERATOR' | 'ANALYST';
 
@@ -53,6 +54,8 @@ export function Sidebar({
   balance,
   superAdmin = false,
   aiError = null,
+  shift = null,
+  dueReminders = 0,
 }: {
   companyName: string;
   userName?: string;
@@ -63,6 +66,10 @@ export function Sidebar({
   superAdmin?: boolean;
   /** Последний сбой ИИ — бот сейчас не отвечает клиентам. */
   aiError?: string | null;
+  /** Смена менеджера — показываем, когда в компании включено авто-распределение. */
+  shift?: { onShift: boolean; startedAt: string | null } | null;
+  /** Напоминания по сделкам, время которых подошло. */
+  dueReminders?: number;
 }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
@@ -110,6 +117,9 @@ export function Sidebar({
                   >
                     <Icon name={item.icon} />
                     <span>{item.label}</span>
+                    {item.href === '/deals' && dueReminders > 0 && (
+                      <span className="nav-badge nav-badge-warn" title="Напоминания, время которых подошло">{dueReminders}</span>
+                    )}
                     {item.href === '/billing' && showBalance && (
                       <span className={`nav-amount ${empty ? 'bad' : low ? 'warn' : ''}`}>{balance.exempt ? 'без лимита' : tiyn(balance.tiyn)}</span>
                     )}
@@ -140,6 +150,8 @@ export function Sidebar({
             {empty ? 'Баланс ИИ закончился — бот не отвечает клиентам. Пополнить' : `Баланс ИИ на исходе: ${tiyn(balance!.tiyn)}. Пополнить`}
           </Link>
         )}
+
+        {shift && <ShiftToggle onShift={shift.onShift} startedAt={shift.startedAt} />}
 
         <div className="side-user">
           <div style={{ minWidth: 0 }}>

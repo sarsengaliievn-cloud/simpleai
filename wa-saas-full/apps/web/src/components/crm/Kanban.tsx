@@ -5,7 +5,7 @@ import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { moveDealAction } from '@/app/deals/actions';
 import type { StageView } from '@/lib/crm';
-import { money, since, initials, avatarColor } from '@/lib/format';
+import { money, since, initials, avatarColor, clockWithDay } from '@/lib/format';
 import { OrderForm, LostForm } from './StageForms';
 
 export type KanbanCard = {
@@ -19,9 +19,27 @@ export type KanbanCard = {
   stageChangedAt: Date;
   unread: number;
   botActive: boolean;
+  /** Без движения дольше порога — карточка краснеет. */
+  stale?: boolean;
+  lastActivity?: Date;
+  remindAt?: Date | null;
+  remindNote?: string | null;
+  /** Сколько раз покупал раньше. */
+  repeat?: number;
+  /** Заголовок рекламы, если клиент пришёл с неё. */
+  ad?: string | null;
 };
 
 type Pending = { card: KanbanCard; stage: StageView } | null;
+
+/** Нужно ли спросить что-то перед переносом: сумму для заказа, причину для отказа. */
+function needsForm(card: KanbanCard, stage: StageView) {
+  if (stage.kind === 'LOST') return true;
+  if (stage.kind === 'ORDER') return !card.amount || !card.product;
+  // «Купил» без суммы — предложим указать, иначе продажа не попадёт в выручку.
+  if (stage.kind === 'WON') return !card.amount;
+  return false;
+}
 
 /**
  * Доска сделок. Карточку перетаскивают мышью; на «Новый заказ» и «Отказ»
@@ -32,10 +50,12 @@ export function Kanban({
   stages,
   cards: initial,
   linkParams,
+  lostReasons,
 }: {
   stages: StageView[];
   cards: KanbanCard[];
   linkParams: Record<string, string>;
+  lostReasons: string[];
 }) {
   const router = useRouter();
   const [cards, setCards] = useState(initial);
@@ -75,7 +95,7 @@ export function Kanban({
 
   const request = (card: KanbanCard, stage: StageView) => {
     if (card.stageId === stage.id) return;
-    if (stage.kind === 'ORDER' || stage.kind === 'LOST') setAsk({ card, stage });
+    if (needsForm(card, stage)) setAsk({ card, stage });
     else move(card, stage);
   };
 
@@ -116,7 +136,7 @@ export function Kanban({
                 {list.map((card) => (
                   <article
                     key={card.id}
-                    className={`kan-card ${dragId === card.id ? 'dragging' : ''}`}
+                    className={`kan-card ${dragId === card.id ? 'dragging' : ''} ${card.stale ? 'stale' : ''} ${card.remindAt && new Date(card.remindAt) <= new Date() ? 'due' : ''}`}
                     draggable
                     onDragStart={(e) => {
                       e.dataTransfer.setData('text/plain', card.id);
@@ -130,6 +150,15 @@ export function Kanban({
                         <span className="kan-card-n">{card.name}</span>
                         {card.unread > 0 && <span className="nav-badge">{card.unread}</span>}
                       </div>
+                      {(card.repeat || card.ad || card.remindAt) ? (
+                        <div className="kan-tags">
+                          {card.repeat ? <span className="kan-tag tag-repeat" title="Уже покупал у вас">↻ покупал {card.repeat > 1 ? `${card.repeat} раза` : 'раньше'}</span> : null}
+                          {card.ad ? <span className="kan-tag tag-ad" title={card.ad}>реклама</span> : null}
+                          {card.remindAt ? (
+                            <span className="kan-tag tag-remind" title={card.remindNote ?? 'Напоминание'} suppressHydrationWarning>⏰ {clockWithDay(card.remindAt)}</span>
+                          ) : null}
+                        </div>
+                      ) : null}
                       {(card.amount || card.product) && (
                         <div className="kan-card-o">
                           {card.amount ? <b>{money(card.amount)}</b> : null}
@@ -145,7 +174,11 @@ export function Kanban({
                         ) : (
                           <span>{card.botActive ? 'отвечает бот' : 'без менеджера'}</span>
                         )}
-                        <span suppressHydrationWarning>{since(card.stageChangedAt)}</span>
+                        {card.stale ? (
+                          <span className="kan-stale" suppressHydrationWarning title="Ни этап, ни переписка не менялись">завис · {since(card.lastActivity ?? card.stageChangedAt)}</span>
+                        ) : (
+                          <span suppressHydrationWarning>{since(card.stageChangedAt)}</span>
+                        )}
                       </div>
                     </Link>
                     {/* Без мыши (телефон, клавиатура) — этап выбирается здесь. */}
@@ -202,17 +235,19 @@ export function Kanban({
       {ask && (
         <div className="modal-scrim" onClick={() => !pending && setAsk(null)}>
           <div className="modal" role="dialog" aria-modal="true" aria-label={ask.stage.name} onClick={(e) => e.stopPropagation()}>
-            <h2 className="card-t">{ask.stage.kind === 'ORDER' ? `Новый заказ — ${ask.card.name}` : `Отказ — ${ask.card.name}`}</h2>
+            <h2 className="card-t">{ask.stage.name} — {ask.card.name}</h2>
             {error && <div className="notice notice-bad">{error}</div>}
-            {ask.stage.kind === 'ORDER' ? (
+            {ask.stage.kind === 'LOST' ? (
+              <LostForm reasons={lostReasons} pending={pending} onCancel={() => setAsk(null)} onSubmit={(reason) => move(ask.card, ask.stage, { lostReason: reason })} />
+            ) : (
               <OrderForm
                 initial={{ amount: ask.card.amount, product: ask.card.product }}
                 pending={pending}
+                optional={ask.stage.kind === 'WON'}
+                submitLabel={ask.stage.kind === 'WON' ? `Перенести в «${ask.stage.name}»` : 'Оформить заказ'}
                 onCancel={() => setAsk(null)}
                 onSubmit={(v) => move(ask.card, ask.stage, v)}
               />
-            ) : (
-              <LostForm pending={pending} onCancel={() => setAsk(null)} onSubmit={(reason) => move(ask.card, ask.stage, { lostReason: reason })} />
             )}
           </div>
         </div>

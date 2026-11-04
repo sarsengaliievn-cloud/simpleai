@@ -18,6 +18,7 @@ import {
   sendErrorText,
   type AiReplyJob,
   aiErrorReason,
+  autoAssignConversation,
 } from '@wa/core';
 import { getProvider } from '@wa/whatsapp';
 
@@ -281,6 +282,13 @@ async function handOff(db: Db, conversationId: string, text: string, metadata: R
       metadata,
     } as never,
   });
+  // Бот отдал диалог — следующему по очереди менеджеру на смене.
+  const conversation = await db.conversation.findFirst({ where: { id: conversationId }, select: { companyId: true } });
+  if (conversation) {
+    await autoAssignConversation(db, { companyId: conversation.companyId, conversationId }).catch((error) =>
+      console.error('[crm] авто-распределение:', (error as Error).message),
+    );
+  }
 }
 
 /**

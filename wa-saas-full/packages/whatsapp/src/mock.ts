@@ -5,6 +5,7 @@ import type {
   OutboundMediaMessage,
   SendResult,
   InboundMessage,
+  AdReferral,
   StatusUpdate,
   PhoneNumberInfo,
   EchoMessage,
@@ -151,6 +152,7 @@ export function parseMetaWebhook(payload: unknown): InboundMessage[] {
           from: message.from,
           profileName: names.get(String(message.from)) ?? (names.size === 0 ? fallbackName : undefined),
           ...messageContent(message),
+          ...(message.referral ? { referral: parseReferral(message.referral) } : {}),
           timestamp: metaTime(message.timestamp),
         });
       }
@@ -158,6 +160,19 @@ export function parseMetaWebhook(payload: unknown): InboundMessage[] {
   }
 
   return result;
+}
+
+/** Реклама Click-to-WhatsApp: Meta кладёт referral в первое сообщение клиента. */
+export function parseReferral(raw: any): AdReferral {
+  const str = (v: unknown, max = 300) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined);
+  return {
+    sourceType: str(raw?.source_type, 20),
+    sourceId: str(raw?.source_id, 64),
+    sourceUrl: str(raw?.source_url, 500),
+    headline: str(raw?.headline, 200),
+    body: str(raw?.body, 500),
+    ctwaClid: str(raw?.ctwa_clid, 200),
+  };
 }
 
 /** Тип, текст и вложение — одинаково для входящих и для ответов с телефона. */

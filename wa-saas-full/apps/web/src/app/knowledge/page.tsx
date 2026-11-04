@@ -1,4 +1,5 @@
 import { requireCompany } from '@/lib/session';
+import { sidebarExtras } from '@/lib/sidebar';
 import { Sidebar } from '@/components/Sidebar';
 import { isSuperAdmin } from '@/lib/admin';
 import { KnowledgeUpload } from '@/components/KnowledgeUpload';
@@ -18,7 +19,9 @@ const STATUS: Record<string, [string, string]> = {
 };
 
 export default async function KnowledgePage() {
-  const { company, db, user, role } = await requireCompany('knowledge:manage');
+  const ctx = await requireCompany('knowledge:manage');
+  const { company, db, user, role } = ctx;
+  const extras = await sidebarExtras(ctx);
 
   const docs = await db.knowledgeDocument.findMany({ orderBy: { createdAt: 'desc' }, take: 100 });
   const chunks = docs.reduce((sum, d) => sum + d.chunkCount, 0);
@@ -29,7 +32,7 @@ export default async function KnowledgePage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} {...extras} />
       <div className="main">
         <AutoRefresh active={indexing} />
         <header className="top">

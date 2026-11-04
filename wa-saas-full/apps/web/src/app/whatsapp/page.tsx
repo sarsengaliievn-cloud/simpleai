@@ -1,4 +1,5 @@
 import { requireCompany } from '@/lib/session';
+import { sidebarExtras } from '@/lib/sidebar';
 import { Sidebar } from '@/components/Sidebar';
 import { isSuperAdmin } from '@/lib/admin';
 import { ConnectSection } from '@/components/ConnectSection';
@@ -15,7 +16,9 @@ const STATUS: Record<string, [string, string]> = {
 };
 
 export default async function WhatsAppPage() {
-  const { company, db, user, role } = await requireCompany('whatsapp:manage');
+  const ctx = await requireCompany('whatsapp:manage');
+  const { company, db, user, role } = ctx;
+  const extras = await sidebarExtras(ctx);
 
   const numbers = await db.whatsAppPhoneNumber.findMany({
     orderBy: { createdAt: 'asc' },
@@ -30,7 +33,7 @@ export default async function WhatsAppPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} {...extras} />
       <div className="main">
         <header className="top">
           <div className="top-t"><h1>WhatsApp</h1><p className="top-hint">Номера, на которые пишут клиенты</p></div>

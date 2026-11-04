@@ -7,13 +7,19 @@ import {
   assignDealAction,
   updateDealAction,
   addDealNoteAction,
+  setReminderAction,
   type DealResult,
 } from '@/app/deals/actions';
 import type { DealView, MemberView, StageView } from '@/lib/crm';
 import { money, clockWithDay, since } from '@/lib/format';
 import { OrderForm, LostForm } from './StageForms';
 
-type Mode = { kind: 'idle' } | { kind: 'order'; stageId: string } | { kind: 'lost'; stageId: string } | { kind: 'edit' };
+type Mode =
+  | { kind: 'idle' }
+  | { kind: 'order'; stageId: string }
+  | { kind: 'won'; stageId: string }
+  | { kind: 'lost'; stageId: string }
+  | { kind: 'edit' };
 
 /**
  * Карточка сделки: этап, менеджер, заказ, история. Этапы показаны нитью —
@@ -23,12 +29,14 @@ export function DealPanel({
   deal,
   stages,
   members,
+  lostReasons,
   showDialogLink = false,
 }: {
   deal: DealView;
   stages: StageView[];
   /** null — пользователь не может передавать клиентов (менеджер). */
   members: MemberView[] | null;
+  lostReasons: string[];
   showDialogLink?: boolean;
 }) {
   const [mode, setMode] = useState<Mode>({ kind: 'idle' });
@@ -38,9 +46,12 @@ export function DealPanel({
 
   const current = stages.find((s) => s.id === deal.stageId);
   const currentIndex = stages.findIndex((s) => s.id === deal.stageId);
-  const orderStage = stages.find((s) => s.kind === 'ORDER');
-  const lostStage = stages.find((s) => s.kind === 'LOST');
-  const wonStage = stages.find((s) => s.kind === 'WON');
+  // Ближайший заказ и «купил» после текущего этапа, если есть, иначе первые по списку.
+  const after = (kind: StageView['kind']) =>
+    stages.find((s, i) => s.kind === kind && i > currentIndex) ?? stages.find((s) => s.kind === kind);
+  const orderStage = after('ORDER');
+  const wonStage = after('WON');
+  const lostStages = stages.filter((s) => s.kind === 'LOST');
 
   const run = (fn: () => Promise<DealResult>, after?: () => void) => {
     setError(null);
@@ -56,7 +67,8 @@ export function DealPanel({
 
   const pick = (stage: StageView) => {
     if (stage.id === deal.stageId && stage.kind !== 'ORDER') return;
-    if (stage.kind === 'ORDER') return setMode({ kind: 'order', stageId: stage.id });
+    if (stage.kind === 'ORDER' && (!deal.amount || !deal.product || stage.id === deal.stageId)) return setMode({ kind: 'order', stageId: stage.id });
+    if (stage.kind === 'WON' && !deal.amount) return setMode({ kind: 'won', stageId: stage.id });
     if (stage.kind === 'LOST') return setMode({ kind: 'lost', stageId: stage.id });
     run(() => moveDealAction(deal.id, stage.id));
   };
@@ -81,9 +93,9 @@ export function DealPanel({
       {/* Главные действия — то, ради чего менеджер открыл карточку. */}
       {mode.kind === 'idle' && current?.kind !== 'WON' && current?.kind !== 'LOST' && (
         <div className="deal-actions">
-          {/* Заказ уже оформлен — следующий шаг: выдать. */}
-          {current?.kind === 'ORDER' && wonStage ? (
-            <button className="btn btn-primary btn-sm" disabled={pending} onClick={() => run(() => moveDealAction(deal.id, wonStage.id))}>
+          {/* Заказ уже оформлен (или этапа «Заказ» нет) — следующий шаг: «Купил». */}
+          {(current?.kind === 'ORDER' || !orderStage) && wonStage ? (
+            <button className="btn btn-primary btn-sm" disabled={pending} onClick={() => pick(wonStage)}>
               {wonStage.name}
             </button>
           ) : orderStage ? (
@@ -91,11 +103,11 @@ export function DealPanel({
               {orderStage.name}
             </button>
           ) : null}
-          {lostStage && (
-            <button className="btn btn-quiet btn-sm" disabled={pending} onClick={() => setMode({ kind: 'lost', stageId: lostStage.id })}>
-              Отказ
+          {lostStages.map((ls) => (
+            <button key={ls.id} className="btn btn-quiet btn-sm" disabled={pending} onClick={() => setMode({ kind: 'lost', stageId: ls.id })}>
+              {ls.name}
             </button>
-          )}
+          ))}
         </div>
       )}
 
@@ -107,8 +119,19 @@ export function DealPanel({
           onSubmit={(v) => run(() => moveDealAction(deal.id, mode.stageId, v))}
         />
       )}
+      {mode.kind === 'won' && (
+        <OrderForm
+          initial={deal}
+          pending={pending}
+          optional
+          submitLabel={`Перенести в «${stages.find((x) => x.id === mode.stageId)?.name ?? 'Купил'}»`}
+          onCancel={() => setMode({ kind: 'idle' })}
+          onSubmit={(v) => run(() => moveDealAction(deal.id, mode.stageId, v))}
+        />
+      )}
       {mode.kind === 'lost' && (
         <LostForm
+          reasons={lostReasons}
           pending={pending}
           onCancel={() => setMode({ kind: 'idle' })}
           onSubmit={(reason) => run(() => moveDealAction(deal.id, mode.stageId, { lostReason: reason }))}
@@ -116,7 +139,7 @@ export function DealPanel({
       )}
 
       {/* Заказ — сумма и товар, если уже оформлен. */}
-      {(deal.amount || deal.product) && mode.kind !== 'order' && (
+      {(deal.amount || deal.product) && mode.kind !== 'order' && mode.kind !== 'won' && (
         mode.kind === 'edit' ? (
           <OrderForm
             initial={deal}
@@ -138,6 +161,36 @@ export function DealPanel({
       )}
       {current?.kind === 'LOST' && deal.lostReason && (
         <div className="deal-lost">Отказ: {deal.lostReason}</div>
+      )}
+
+      <ReminderBox deal={deal} pending={pending} run={run} closed={current?.kind === 'WON' || current?.kind === 'LOST'} />
+
+      {(deal.purchases.length > 0 || deal.source !== 'WhatsApp напрямую') && (
+        <div className="deal-sec">
+          {deal.source !== 'WhatsApp напрямую' && (
+            <div className="small" style={{ marginBottom: deal.purchases.length ? 10 : 0 }}>
+              <span className="muted">Пришёл с рекламы: </span>
+              {deal.adUrl ? <a href={deal.adUrl} target="_blank" rel="noreferrer">{deal.source}</a> : <b>{deal.source}</b>}
+            </div>
+          )}
+          {deal.purchases.length > 0 && (
+            <>
+              <div className="deal-sec-t">
+                Повторный клиент · покупал {deal.purchases.length} {deal.purchases.length === 1 ? 'раз' : deal.purchases.length < 5 ? 'раза' : 'раз'}
+                {deal.purchases.some((p) => p.amount) ? ` на ${money(deal.purchases.reduce((sum, p) => sum + (p.amount ?? 0), 0))}` : ''}
+              </div>
+              <ul className="purchases">
+                {deal.purchases.map((p) => (
+                  <li key={p.id}>
+                    <span className="tiny muted" suppressHydrationWarning>{clockWithDay(p.at)}</span>
+                    <span className="small">{p.product ?? 'без товара'}</span>
+                    <b className="small">{p.amount ? money(p.amount) : ''}</b>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
       )}
 
       <div className="deal-sec">
@@ -202,6 +255,80 @@ export function DealPanel({
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+const pad = (n: number) => String(n).padStart(2, '0');
+/** Значение для <input type="datetime-local"> во времени браузера. */
+const localValue = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+/** Напоминание о клиенте: когда вернуться и зачем. */
+function ReminderBox({
+  deal,
+  pending,
+  run,
+  closed,
+}: {
+  deal: DealView;
+  pending: boolean;
+  run: (fn: () => Promise<DealResult>, after?: () => void) => void;
+  closed: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [at, setAt] = useState('');
+  const [text, setText] = useState(deal.remindNote ?? '');
+
+  const preset = (fn: (d: Date) => void) => {
+    const d = new Date();
+    d.setSeconds(0, 0);
+    fn(d);
+    setAt(localValue(d));
+  };
+
+  if (closed && !deal.remindAt) return null;
+  const due = deal.remindAt && new Date(deal.remindAt) <= new Date();
+
+  return (
+    <div className="deal-sec">
+      <div className="deal-sec-t">Напоминание</div>
+      {deal.remindAt && !open ? (
+        <div className={`remind ${due ? 'due' : ''}`}>
+          <div>
+            <b suppressHydrationWarning>⏰ {clockWithDay(deal.remindAt)}</b>
+            {due && <span className="tiny"> — пора</span>}
+            {deal.remindNote && <div className="small">{deal.remindNote}</div>}
+          </div>
+          <div className="row" style={{ gap: 4 }}>
+            <button className="btn btn-quiet btn-sm" disabled={pending} onClick={() => { setAt(localValue(new Date(deal.remindAt!))); setOpen(true); }}>Изменить</button>
+            <button className="btn btn-quiet btn-sm" disabled={pending} onClick={() => run(() => setReminderAction(deal.id, null, ''))}>{due ? 'Сделано' : 'Снять'}</button>
+          </div>
+        </div>
+      ) : !open ? (
+        <button className="btn btn-ghost btn-sm" onClick={() => { preset((d) => d.setDate(d.getDate() + 1)); setOpen(true); }}>Напомнить о клиенте</button>
+      ) : (
+        <form
+          className="stage-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!at) return;
+            run(() => setReminderAction(deal.id, new Date(at).toISOString(), text), () => setOpen(false));
+          }}
+        >
+          <div className="reason-chips">
+            <button type="button" className="chip chip-btn" onClick={() => preset((d) => d.setHours(d.getHours() + 1))}>Через час</button>
+            <button type="button" className="chip chip-btn" onClick={() => preset((d) => { d.setDate(d.getDate() + 1); d.setHours(10, 0); })}>Завтра в 10:00</button>
+            <button type="button" className="chip chip-btn" onClick={() => preset((d) => { d.setDate(d.getDate() + 3); d.setHours(10, 0); })}>Через 3 дня</button>
+            <button type="button" className="chip chip-btn" onClick={() => preset((d) => { d.setDate(d.getDate() + 7); d.setHours(10, 0); })}>Через неделю</button>
+          </div>
+          <input className="input" type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} required style={{ marginBottom: 8 }} />
+          <input className="input" value={text} onChange={(e) => setText(e.target.value)} placeholder="О чём: перезвонить, придёт за размером 41…" maxLength={300} style={{ marginBottom: 10 }} />
+          <div className="row">
+            <button className="btn btn-primary btn-sm" type="submit" disabled={pending || !at}>Сохранить</button>
+            <button className="btn btn-quiet btn-sm" type="button" onClick={() => setOpen(false)}>Отмена</button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }

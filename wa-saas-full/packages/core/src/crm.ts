@@ -14,6 +14,25 @@ const REOPEN_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 /** Причины отказа на выбор — плюс свободный текст. */
 export const LOST_REASONS = ['Дорого', 'Нет размера или модели', 'Купил в другом месте', 'Не отвечает', 'Передумал'];
 
+/** Свой список компании или стандартный, если свой не задан. */
+export function lostReasonsOf(company: { lostReasons?: string[] | null }) {
+  const own = (company.lostReasons ?? []).map((r) => r.trim()).filter(Boolean);
+  return own.length ? own : LOST_REASONS;
+}
+
+/** Чистит список причин: без пустых и повторов, не длиннее 40 символов, максимум 12. */
+export function cleanLostReasons(list: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of list) {
+    const r = raw.trim().replace(/\s+/g, ' ').slice(0, 40);
+    if (!r || seen.has(r.toLowerCase())) continue;
+    seen.add(r.toLowerCase());
+    out.push(r);
+  }
+  return out.slice(0, 12);
+}
+
 export class CrmError extends Error {}
 
 /** Сумма в тенге с пробелами: 12 500 ₸. */
@@ -130,6 +149,8 @@ export async function moveDeal(
       ...(kind === 'ORDER' || kind === 'WON' ? { orderedAt: deal.orderedAt ?? now } : {}),
       ...(kind === 'WON' ? { wonAt: deal.wonAt ?? now, lostAt: null, lostReason: null } : {}),
       ...(kind === 'LOST' ? { lostAt: now, lostReason } : {}),
+      // Сделка закрыта — напоминать больше не о чем.
+      ...(kind === 'WON' || kind === 'LOST' ? { remindAt: null, remindNote: null } : {}),
       // Вернули из отказа в работу — отказ больше не считается.
       ...(kind !== 'LOST' && deal.lostAt ? { lostAt: null, lostReason: null } : {}),
     },
@@ -159,7 +180,7 @@ export async function moveDeal(
  */
 export async function assignDeal(
   db: TenantClient,
-  input: { dealId: string; assigneeId: string; assigneeName: string; actorUserId?: string | null },
+  input: { dealId: string; assigneeId: string; assigneeName: string; actorUserId?: string | null; auto?: boolean },
 ) {
   const deal = await db.deal.findFirst({ where: { id: input.dealId }, include: { stage: true } });
   if (!deal) throw new CrmError('Сделка не найдена');
@@ -182,7 +203,7 @@ export async function assignDeal(
       dealId: deal.id,
       actorUserId: input.actorUserId ?? null,
       type: 'assigned',
-      text: `Передан менеджеру: ${input.assigneeName}`,
+      text: input.auto ? `Передан по очереди менеджеру на смене: ${input.assigneeName}` : `Передан менеджеру: ${input.assigneeName}`,
       data: { assigneeId: input.assigneeId },
     } as never,
   });
@@ -198,12 +219,206 @@ export async function assignDeal(
         direction: 'OUTBOUND',
         authorType: 'SYSTEM',
         authorUserId: input.actorUserId ?? null,
-        text: `Клиент передан менеджеру ${input.assigneeName} — ассистент в этом диалоге больше не отвечает`,
+        text: input.auto
+          ? `Клиент передан по очереди менеджеру ${input.assigneeName} (на смене) — ассистент в этом диалоге больше не отвечает`
+          : `Клиент передан менеджеру ${input.assigneeName} — ассистент в этом диалоге больше не отвечает`,
         status: 'SENT',
         sentAt: now,
       } as never,
     });
   }
+}
+
+/* ── Этапы: тип, порядок, удаление ─────────────────────────── */
+
+export type StageDraft = { id?: string | null; name: string; kind: StageKind };
+
+const MAX_STAGES = 12;
+
+/** Что не так с новым списком этапов. null — можно сохранять. */
+export function stagesProblem(draft: StageDraft[], newStageId: string | null): string | null {
+  if (draft.length < 3) return 'Нужно хотя бы три этапа: «Новый», «Купил» и «Отказ»';
+  if (draft.length > MAX_STAGES) return `Больше ${MAX_STAGES} этапов — воронку трудно читать`;
+  const first = draft[0]!;
+  if (first.kind !== 'NEW' || (newStageId && first.id !== newStageId)) return 'Первым всегда идёт этап, куда попадают новые клиенты';
+  if (draft.slice(1).some((s) => s.kind === 'NEW')) return 'Этап для новых клиентов может быть только один';
+  if (!draft.some((s) => s.kind === 'WON')) return 'Нужен хотя бы один этап с типом «Купил»';
+  if (!draft.some((s) => s.kind === 'LOST')) return 'Нужен хотя бы один этап с типом «Отказ»';
+  const seen = new Set<string>();
+  for (const s of draft) {
+    const name = s.name.trim();
+    if (!name) return 'У каждого этапа должно быть название';
+    if (name.length > 40) return `Слишком длинное название: «${name.slice(0, 20)}…»`;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return `Два этапа называются «${name}» — переименуйте один`;
+    seen.add(key);
+  }
+  return null;
+}
+
+/**
+ * Сделки этапа, у которого поменялся тип: даты событий приводим в порядок,
+ * иначе аналитика считала бы покупки там, где клиент просто «думает».
+ */
+export async function fitDealsToKind(db: TenantClient, stageId: string, kind: StageKind) {
+  const deals = await db.deal.findMany({
+    where: { stageId },
+    select: { id: true, stageChangedAt: true, amount: true, orderedAt: true, wonAt: true, lostAt: true },
+  });
+  for (const d of deals) {
+    const at = d.stageChangedAt;
+    const data =
+      kind === 'WON'
+        ? { orderedAt: d.orderedAt ?? at, wonAt: d.wonAt ?? at, lostAt: null, lostReason: null, remindAt: null, remindNote: null }
+        : kind === 'LOST'
+          ? { lostAt: d.lostAt ?? at, wonAt: null, remindAt: null, remindNote: null }
+          : kind === 'ORDER'
+            ? { orderedAt: d.orderedAt ?? at, wonAt: null, lostAt: null, lostReason: null }
+            : { wonAt: null, lostAt: null, lostReason: null, ...(d.amount ? {} : { orderedAt: null }) };
+    await db.deal.updateMany({ where: { id: d.id }, data });
+  }
+  return deals.length;
+}
+
+/**
+ * Сохранить этапы целиком: названия, типы, порядок, новые и удалённые.
+ * Сделки удалённого этапа уходят на ближайший оставшийся этап выше.
+ */
+export async function saveStages(db: TenantClient, draft: StageDraft[]) {
+  const current = await ensureStages(db);
+  const newStage = current.find((s) => s.kind === 'NEW') ?? null;
+  const known = new Set(current.map((s) => s.id));
+  const clean = draft.map((s) => ({ id: s.id && known.has(s.id) ? s.id : null, name: s.name.trim(), kind: s.kind }));
+  const problem = stagesProblem(clean, newStage?.id ?? null);
+  if (problem) throw new CrmError(problem);
+
+  // Сначала создаём новые и обновляем старые — удалённым будет куда отдать сделки.
+  const ids: string[] = [];
+  const changedKind: Array<{ id: string; kind: StageKind }> = [];
+  for (const [position, s] of clean.entries()) {
+    if (s.id) {
+      const before = current.find((c) => c.id === s.id)!;
+      await db.pipelineStage.updateMany({ where: { id: s.id }, data: { name: s.name, kind: s.kind, position } });
+      if (before.kind !== s.kind) changedKind.push({ id: s.id, kind: s.kind });
+      ids.push(s.id);
+    } else {
+      const created = await db.pipelineStage.create({ data: { name: s.name, kind: s.kind, position } as never });
+      ids.push(created.id);
+    }
+  }
+  for (const c of changedKind) await fitDealsToKind(db, c.id, c.kind);
+
+  const kept = new Set(ids);
+  for (const [i, old] of current.entries()) {
+    if (kept.has(old.id)) continue;
+    // Ближайший оставшийся этап выше в старом порядке, иначе — «Новый».
+    const target = current.slice(0, i).reverse().find((c) => kept.has(c.id)) ?? current.find((c) => kept.has(c.id))!;
+    const moved = await db.deal.updateMany({ where: { stageId: old.id }, data: { stageId: target.id } });
+    if (moved.count > 0) {
+      const kind = clean[ids.indexOf(target.id)]!.kind;
+      await fitDealsToKind(db, target.id, kind);
+    }
+    await db.pipelineStage.deleteMany({ where: { id: old.id } });
+  }
+}
+
+/* ── Зависшие и напоминания ────────────────────────────────── */
+
+/**
+ * Клиент завис: сделка в работе, а ни этап, ни переписка не двигались
+ * дольше порога. «Новый» у бота не считается — там отвечает ассистент;
+ * будущее напоминание — тоже: менеджер сам решил вернуться позже.
+ */
+export function isStale(
+  deal: { stageKind: StageKind; stageChangedAt: Date; lastMessageAt?: Date | null; remindAt?: Date | null; botActive?: boolean },
+  hours: number,
+  now = new Date(),
+) {
+  if (deal.stageKind === 'WON' || deal.stageKind === 'LOST') return false;
+  if (deal.stageKind === 'NEW' && deal.botActive) return false;
+  if (deal.remindAt && deal.remindAt > now) return false;
+  const last = Math.max(deal.stageChangedAt.getTime(), deal.lastMessageAt?.getTime() ?? 0);
+  return now.getTime() - last > Math.max(1, hours) * 3600_000;
+}
+
+/* ── Смены и авто-распределение ────────────────────────────── */
+
+/** Панель закрыта дольше — менеджер не получает новых клиентов. */
+export const SHIFT_IDLE_MS = 15 * 60 * 1000;
+/** Забыл закончить смену — она закрывается сама. */
+export const SHIFT_MAX_MS = 14 * 60 * 60 * 1000;
+
+export function onShiftNow(
+  m: { onShift: boolean; shiftStartedAt: Date | null; lastSeenAt: Date | null },
+  now = new Date(),
+) {
+  if (!m.onShift || !m.shiftStartedAt || !m.lastSeenAt) return false;
+  if (now.getTime() - m.shiftStartedAt.getTime() > SHIFT_MAX_MS) return false;
+  return now.getTime() - m.lastSeenAt.getTime() <= SHIFT_IDLE_MS;
+}
+
+/**
+ * Передать нового клиента следующему менеджеру на смене — по очереди: кто
+ * дольше всех не получал клиента. Работает, только если в компании включено
+ * авто-распределение. Никого нет на смене — клиент ждёт без менеджера.
+ */
+export async function autoAssignConversation(
+  db: TenantClient,
+  input: { companyId: string; conversationId: string },
+): Promise<{ assigneeId: string; name: string } | null> {
+  const company = await db.company.findFirst({ where: { id: input.companyId }, select: { autoAssign: true } });
+  if (!company?.autoAssign) return null;
+
+  const deal = await db.deal.findFirst({
+    where: { conversationId: input.conversationId, stage: { kind: { notIn: CLOSED_KINDS } } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!deal || deal.assigneeId) return null;
+
+  const now = new Date();
+  const members = await db.membership.findMany({
+    where: { onShift: true, role: { in: ['OWNER', 'ADMIN', 'MANAGER', 'OPERATOR'] } },
+    include: { user: true },
+  });
+  const queue = members
+    .filter((m) => onShiftNow(m, now))
+    .sort((a, b) => (a.lastAssignedAt?.getTime() ?? 0) - (b.lastAssignedAt?.getTime() ?? 0));
+
+  for (const m of queue) {
+    // Двое клиентов пришли одновременно — второй достанется следующему.
+    const claimed = await db.membership.updateMany({
+      where: { id: m.id, lastAssignedAt: m.lastAssignedAt },
+      data: { lastAssignedAt: now },
+    });
+    if (claimed.count === 0) continue;
+    const name = `${m.user.firstName} ${m.user.lastName}`.trim() || m.user.email;
+    await assignDeal(db, { dealId: deal.id, assigneeId: m.userId, assigneeName: name, auto: true });
+    return { assigneeId: m.userId, name };
+  }
+  return null;
+}
+
+/* ── Реклама ───────────────────────────────────────────────── */
+
+export type AdInfo = { sourceType?: string; sourceId?: string; sourceUrl?: string; headline?: string };
+
+/** Клиент пришёл с рекламы — записываем в сделку, если ещё не записано. */
+export async function recordAdSource(db: TenantClient, dealId: string, ad: AdInfo) {
+  await db.deal.updateMany({
+    where: { id: dealId, adSourceId: null, adHeadline: null },
+    data: {
+      source: 'ad',
+      adSourceType: ad.sourceType ?? null,
+      adSourceId: ad.sourceId ?? null,
+      adSourceUrl: ad.sourceUrl ?? null,
+      adHeadline: ad.headline ?? (ad.sourceId ? `Объявление ${ad.sourceId}` : 'Реклама'),
+    },
+  });
+}
+
+/** Подпись источника для таблиц и карточки. */
+export function sourceLabel(deal: { source: string; adHeadline?: string | null }) {
+  return deal.source === 'ad' ? deal.adHeadline || 'Реклама' : 'WhatsApp напрямую';
 }
 
 /* ── Аналитика ─────────────────────────────────────────────── */
