@@ -58,7 +58,7 @@ export function Sidebar({
   userName?: string;
   role?: Role;
   /** Баланс ИИ компании — показываем владельцу и администратору. */
-  balance?: { tiyn: number; lastTopup: number };
+  balance?: { tiyn: number; lastTopup: number; exempt?: boolean };
   /** Владелец платформы — видит ссылку на админку всех компаний. */
   superAdmin?: boolean;
   /** Последний сбой ИИ — бот сейчас не отвечает клиентам. */
@@ -67,8 +67,8 @@ export function Sidebar({
   const path = usePathname();
   const [open, setOpen] = useState(false);
   const showBalance = balance && ADMINS.includes(role);
-  const empty = showBalance && balance.tiyn <= 0;
-  const low = showBalance && !empty && balance.lastTopup > 0 && balance.tiyn < balance.lastTopup * 0.1;
+  const empty = showBalance && !balance.exempt && balance.tiyn <= 0;
+  const low = showBalance && !balance.exempt && !empty && balance.lastTopup > 0 && balance.tiyn < balance.lastTopup * 0.1;
 
   // На телефоне меню закрывается при переходе на другую страницу.
   useEffect(() => setOpen(false), [path]);
@@ -111,7 +111,7 @@ export function Sidebar({
                     <Icon name={item.icon} />
                     <span>{item.label}</span>
                     {item.href === '/billing' && showBalance && (
-                      <span className={`nav-amount ${empty ? 'bad' : low ? 'warn' : ''}`}>{tiyn(balance.tiyn)}</span>
+                      <span className={`nav-amount ${empty ? 'bad' : low ? 'warn' : ''}`}>{balance.exempt ? 'без лимита' : tiyn(balance.tiyn)}</span>
                     )}
                   </Link>
                 ))}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import { adminCredit, adminSaveSettings, type AdminState } from '@/app/admin/actions';
+import { adminCredit, adminSaveSettings, setBillingExempt, type AdminState } from '@/app/admin/actions';
 
 /** Зачисление на баланс компании — одна строка в таблице компаний. */
 export function CreditForm({ companyId }: { companyId: string }) {
@@ -70,6 +70,19 @@ export function SettingsForm({
         </tbody>
       </table>
       <button className="btn btn-primary" type="submit" disabled={pending}>{pending ? 'Сохраняю…' : 'Сохранить настройки'}</button>
+    </form>
+  );
+}
+
+/** «Без баланса» — для своей компании: за ИИ платите провайдеру напрямую. Сохраняется сразу по клику. */
+export function ExemptToggle({ companyId, exempt }: { companyId: string; exempt: boolean }) {
+  return (
+    <form action={setBillingExempt} className="row tiny" style={{ gap: 6, marginTop: 6 }}>
+      <input type="hidden" name="companyId" value={companyId} />
+      <label className="row" style={{ gap: 6, cursor: 'pointer' }}>
+        <input type="checkbox" name="exempt" defaultChecked={exempt} onChange={(e) => e.currentTarget.form?.requestSubmit()} />
+        Без баланса (своя компания)
+      </label>
     </form>
   );
 }

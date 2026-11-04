@@ -100,7 +100,13 @@ export class OpenAIProvider implements AIProvider {
       body: JSON.stringify({
         model: this.model,
         instructions: options.system,
-        input: options.messages.map((m) => ({ role: m.role, content: m.content })),
+        // Формат json_object OpenAI принимает, только если слово «json» есть во
+        // входных сообщениях — инструкции (instructions) не в счёт. Без этого
+        // каждый ответ падал с 400.
+        input: [
+          { role: 'developer', content: 'Верни ответ строго одним JSON-объектом (json), как описано в инструкции.' },
+          ...options.messages.map((m) => ({ role: m.role, content: m.content })),
+        ],
         // У думающих моделей рассуждения расходуют тот же лимит, что и ответ —
         // с маленьким лимитом JSON обрезался бы на середине.
         max_output_tokens: Math.max(options.maxTokens ?? 0, 8192),

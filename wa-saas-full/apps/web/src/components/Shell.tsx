@@ -14,7 +14,7 @@ export function Shell({
   actions,
   children,
 }: {
-  ctx: { company: { name: string; balanceTiyn: number; lastTopupTiyn: number; aiError?: string | null }; user: { firstName: string; lastName: string; email?: string }; role: Role };
+  ctx: { company: { name: string; balanceTiyn: number; lastTopupTiyn: number; billingExempt?: boolean; aiError?: string | null }; user: { firstName: string; lastName: string; email?: string }; role: Role };
   title: string;
   hint?: ReactNode;
   actions?: ReactNode;
@@ -22,7 +22,7 @@ export function Shell({
 }) {
   return (
     <div className="shell">
-      <Sidebar companyName={ctx.company.name} userName={`${ctx.user.firstName} ${ctx.user.lastName}`.trim()} role={ctx.role} balance={{ tiyn: ctx.company.balanceTiyn, lastTopup: ctx.company.lastTopupTiyn }} superAdmin={isSuperAdmin(ctx.user.email)} aiError={ctx.company.aiError ?? null} />
+      <Sidebar companyName={ctx.company.name} userName={`${ctx.user.firstName} ${ctx.user.lastName}`.trim()} role={ctx.role} balance={{ tiyn: ctx.company.balanceTiyn, lastTopup: ctx.company.lastTopupTiyn, exempt: ctx.company.billingExempt }} superAdmin={isSuperAdmin(ctx.user.email)} aiError={ctx.company.aiError ?? null} />
       <div className="main">
         <header className="top">
           <div className="top-t">

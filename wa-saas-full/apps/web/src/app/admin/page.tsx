@@ -3,7 +3,7 @@ import { prisma } from '@wa/db';
 import { billingSettings, formatTiyn, MODELS, modelInfo, balanceLow } from '@wa/core';
 import { requireSuperAdmin } from '@/lib/admin';
 import { agoText } from '@/lib/format';
-import { CreditForm, SettingsForm } from '@/components/AdminForms';
+import { CreditForm, SettingsForm, ExemptToggle } from '@/components/AdminForms';
 import { resolveTopup } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -112,10 +112,15 @@ export default async function AdminPage() {
                         {` · с ${c.createdAt.toLocaleDateString('ru-RU')}`}
                       </div>
                     </td>
-                    <td className={`num nowrap ${low}`} style={{ fontWeight: 700 }}>{formatTiyn(c.balanceTiyn)}</td>
+                    <td className={`num nowrap ${c.billingExempt ? '' : low}`} style={{ fontWeight: 700 }}>
+                      {c.billingExempt ? <span className="chip chip-ok">без баланса</span> : formatTiyn(c.balanceTiyn)}
+                    </td>
                     <td className="num nowrap">{formatTiyn(charged)}<div className="tiny muted">{u?._count ?? 0} запросов</div></td>
                     <td className="num nowrap small muted">{formatTiyn(costTiyn(u?._sum.costMicroUsd ?? 0))}</td>
-                    <td><CreditForm companyId={c.id} /></td>
+                    <td>
+                      {!c.billingExempt && <CreditForm companyId={c.id} />}
+                      <ExemptToggle companyId={c.id} exempt={c.billingExempt} />
+                    </td>
                   </tr>
                 );
               })}

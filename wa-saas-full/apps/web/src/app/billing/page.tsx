@@ -64,6 +64,16 @@ export default async function BillingPage() {
     <Shell ctx={ctx} title="Баланс ИИ" hint="Каждый ответ бота списывает стоимость с баланса. Закончится — бот передаст клиентов менеджерам">
       <div className="page" style={{ maxWidth: 1100 }}>
         <div className="bill-top">
+          {company.billingExempt ? (
+          <section className="card card-p bill-balance">
+            <div className="small muted">Режим</div>
+            <div className="bill-amount" style={{ fontSize: 28 }}>Без баланса</div>
+            <div className="small">
+              За ИИ вы платите напрямую провайдеру (OpenAI, Google). Здесь ничего не списывается, и бот не останавливается.
+              Ниже — сколько стоили ответы по нашим ценам, чтобы видеть расход.
+            </div>
+          </section>
+          ) : (
           <section className={`card card-p bill-balance ${balance <= 0 ? 'empty' : low ? 'low' : ''}`}>
             <div className="small muted">Осталось</div>
             <div className="bill-amount">{formatTiyn(balance)}</div>
@@ -78,6 +88,7 @@ export default async function BillingPage() {
             </div>
             {low && balance > 0 && <div className="small" style={{ marginTop: 6, fontWeight: 600 }}>Осталось меньше 10% от последнего пополнения</div>}
           </section>
+          )}
 
           <section className="card card-p bill-facts">
             <div><span className="small muted">Потрачено за 30 дней</span><b>{formatTiyn(spent30)}</b></div>
@@ -107,6 +118,7 @@ export default async function BillingPage() {
         </div>
 
         <div className="an-grid">
+          {!company.billingExempt && (
           <section className="card card-p">
             <h2 className="card-t">Пополнить</h2>
             <p className="small" style={{ margin: '4px 0 16px', whiteSpace: 'pre-line', maxWidth: '62ch' }}>{settings.topupInstructions}</p>
@@ -126,6 +138,7 @@ export default async function BillingPage() {
               </ul>
             )}
           </section>
+          )}
 
           <section className="card" style={{ overflowX: 'auto' }}>
             <div className="card-p" style={{ paddingBottom: 0 }}><h2 className="card-t">Пополнения и бонусы</h2></div>

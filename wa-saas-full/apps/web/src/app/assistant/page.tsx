@@ -46,7 +46,7 @@ export default async function AssistantPage({ searchParams }: Props) {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
       <div className="main">
         <header className="top">
           <div className="top-t"><h1>Как отвечает ассистент</h1><p className="top-hint">Как бот разговаривает с клиентами: тон, правила, рабочие часы</p></div>

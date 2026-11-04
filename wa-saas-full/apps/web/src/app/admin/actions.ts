@@ -82,3 +82,17 @@ export async function adminSaveSettings(_prev: AdminState, formData: FormData): 
   revalidatePath('/admin');
   return { ok: 'Сохранено. Новые цены начнут действовать в течение минуты.' };
 }
+
+/** Компания без внутреннего баланса: ничего не списывается, бот не останавливается. */
+export async function setBillingExempt(formData: FormData) {
+  const admin = await requireSuperAdmin();
+  const companyId = String(formData.get('companyId') ?? '');
+  const exempt = formData.get('exempt') === 'on';
+  const company = await prisma.company.updateMany({ where: { id: companyId }, data: { billingExempt: exempt } });
+  if (company.count === 1) {
+    await prisma.auditLog.create({
+      data: { companyId, action: exempt ? 'billing.exempt.on' : 'billing.exempt.off', entityType: 'Company', entityId: companyId, metadata: { by: admin.email } } as never,
+    }).catch(() => {});
+  }
+  revalidatePath('/admin');
+}

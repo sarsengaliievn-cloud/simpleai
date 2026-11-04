@@ -94,6 +94,9 @@ model Company {
   balanceTiyn   Int    @default(0)
   /// Последнее пополнение — от него считается «осталось меньше 10%».
   lastTopupTiyn Int    @default(0)
+  /// Без внутреннего баланса: за ИИ платит владелец платформы напрямую провайдеру.
+  /// Расход считается для статистики, но не списывается, и бот не останавливается.
+  billingExempt Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

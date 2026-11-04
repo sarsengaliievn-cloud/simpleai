@@ -23,7 +23,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn, exempt: company.billingExempt }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
       <div className="main">
         <header className="top"><div className="top-t"><h1>Настройки</h1><p className="top-hint">Данные компании и журнал изменений</p></div></header>
 

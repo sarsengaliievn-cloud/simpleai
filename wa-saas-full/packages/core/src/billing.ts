@@ -126,8 +126,8 @@ export function formatTiyn(tiyn: number) {
 
 /** Деньги ещё есть? Бот отвечает только при положительном балансе. */
 export async function hasBalance(companyId: string): Promise<boolean> {
-  const company = await prisma.company.findUnique({ where: { id: companyId }, select: { balanceTiyn: true } });
-  return (company?.balanceTiyn ?? 0) > 0;
+  const company = await prisma.company.findUnique({ where: { id: companyId }, select: { balanceTiyn: true, billingExempt: true } });
+  return Boolean(company?.billingExempt) || (company?.balanceTiyn ?? 0) > 0;
 }
 
 export type UsageKind = 'reply' | 'playground' | 'knowledge' | 'voice';
@@ -145,6 +145,7 @@ export async function recordUsage(
   const settings = await billingSettings();
   const usd = costUsd(usage, settings);
   const charge = chargeTiyn(usd, settings);
+  const exempt = (await prisma.company.findUnique({ where: { id: companyId }, select: { billingExempt: true } }))?.billingExempt;
   await prisma.$transaction([
     prisma.aiUsage.create({
       data: {
@@ -161,7 +162,8 @@ export async function recordUsage(
         conversationId: conversationId ?? null,
       },
     }),
-    prisma.company.update({ where: { id: companyId }, data: { balanceTiyn: { decrement: charge } } }),
+    // Без баланса — расход только в статистике, со счёта не списываем.
+    ...(exempt ? [] : [prisma.company.update({ where: { id: companyId }, data: { balanceTiyn: { decrement: charge } } })]),
   ]);
   return charge;
 }
