@@ -2,6 +2,7 @@ import type {
   WhatsAppProvider,
   OutboundTextMessage,
   OutboundTemplateMessage,
+  OutboundMediaMessage,
   SendResult,
   InboundMessage,
   StatusUpdate,
@@ -24,6 +25,11 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
     this.sent.push(message);
     console.log(`[mock-whatsapp] -> ${message.to}: ${message.text}`);
     return { providerMessageId: `mock_${Date.now()}_${Math.random().toString(36).slice(2, 8)}` };
+  }
+
+  async sendMedia(message: OutboundMediaMessage): Promise<SendResult & { mediaId: string }> {
+    console.log(`[mock-whatsapp] -> ${message.to}: ${message.kind} ${message.fileName ?? ''} (${message.data.length} байт)`);
+    return { providerMessageId: `mock_media_${Date.now()}`, mediaId: `mock-media-${Date.now()}` };
   }
 
   async sendTemplate(message: OutboundTemplateMessage): Promise<SendResult> {
@@ -71,7 +77,7 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
    * production: иначе любой, кто шлёт вебхуки, заставил бы сервер ходить
    * по произвольным адресам. Настоящий media id идёт в Cloud API как обычно.
    */
-  async downloadMedia({ mediaId, accessToken }: { mediaId: string; accessToken: string | null }): Promise<DownloadedMedia> {
+  async downloadMedia({ mediaId, accessToken, maxBytes }: { mediaId: string; accessToken: string | null; maxBytes?: number }): Promise<DownloadedMedia> {
     if (/^https?:\/\//.test(mediaId)) {
       if (process.env.NODE_ENV === 'production') throw new Error('Ссылки вместо media id запрещены в production');
       const response = await fetch(mediaId);
@@ -81,7 +87,7 @@ export class MockWhatsAppProvider implements WhatsAppProvider {
       return { data, mimeType: response.headers.get('content-type') ?? 'audio/ogg' };
     }
     if (!accessToken) throw new Error('Нет токена WhatsApp-аккаунта для скачивания файла');
-    return downloadCloudMedia(mediaId, accessToken);
+    return downloadCloudMedia(mediaId, accessToken, maxBytes);
   }
 }
 
@@ -155,7 +161,7 @@ export function parseMetaWebhook(payload: unknown): InboundMessage[] {
 }
 
 /** Тип, текст и вложение — одинаково для входящих и для ответов с телефона. */
-function messageContent(message: any): Pick<InboundMessage, 'type' | 'text' | 'mediaId' | 'mediaMimeType'> {
+function messageContent(message: any): Pick<InboundMessage, 'type' | 'text' | 'mediaId' | 'mediaMimeType' | 'fileName'> {
   const type = message.type as string;
   // Нажатие кнопки шаблона и выбор из списка — для ассистента это
   // обычный текстовый ответ клиента.
@@ -174,6 +180,7 @@ function messageContent(message: any): Pick<InboundMessage, 'type' | 'text' | 'm
     text: message.text?.body ?? replyText ?? message[type]?.caption,
     mediaId: message[type]?.id,
     mediaMimeType: message[type]?.mime_type,
+    fileName: message.document?.filename,
   };
 }
 

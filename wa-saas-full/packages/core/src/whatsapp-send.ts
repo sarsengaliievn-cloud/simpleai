@@ -74,3 +74,37 @@ export async function markWhatsAppRead(db: TenantClient, input: { phoneNumberRow
 export function sendErrorText(error: unknown): string {
   return error instanceof WhatsAppSendError ? error.userMessage : 'Не удалось отправить сообщение. Попробуйте ещё раз.';
 }
+
+/** Фото, видео или файл менеджера: загрузка в Meta и отправка клиенту. */
+export async function sendWhatsAppMedia(
+  db: TenantClient,
+  input: { phoneNumberRowId: string; to: string; kind: 'image' | 'video' | 'document'; data: Buffer; mimeType: string; fileName?: string; caption?: string },
+): Promise<SendResult & { mediaId: string }> {
+  const { number, accessToken } = await resolveNumber(db, input.phoneNumberRowId);
+  try {
+    return await getProvider().sendMedia({
+      phoneNumberId: number.phoneNumberId,
+      to: input.to,
+      kind: input.kind,
+      data: input.data,
+      mimeType: input.mimeType,
+      fileName: input.fileName,
+      caption: input.caption,
+      accessToken,
+    });
+  } catch (error) {
+    if (error instanceof WhatsAppSendError && error.authProblem && error.code !== 'no_token') {
+      await flagAuthProblem(db, number.accountId, number.id);
+    }
+    throw error;
+  }
+}
+
+/** Токен номера, к которому привязан диалог, — для скачивания вложений. */
+export async function numberAccessToken(db: TenantClient, phoneNumberRowId: string): Promise<string | null> {
+  try {
+    return (await resolveNumber(db, phoneNumberRowId)).accessToken ?? null;
+  } catch {
+    return null;
+  }
+}

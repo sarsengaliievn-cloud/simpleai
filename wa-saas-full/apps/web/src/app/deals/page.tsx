@@ -74,7 +74,7 @@ export default async function DealsPage({ searchParams }: Props) {
     .filter((d) => stages.find((s) => s.id === d.stageId)?.kind === 'ORDER')
     .reduce((sum, d) => sum + (d.amount ?? 0), 0);
 
-  const selected = id ? await loadDeal(db, { id, ...ownDeals }) : null;
+  const selected = id && /^[0-9a-f-]{36}$/i.test(id) ? await loadDeal(db, { id, ...ownDeals }) : null;
   const params = (extra: Record<string, string>) => {
     const sp = new URLSearchParams({ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...extra });
     return `/deals${sp.size ? `?${sp}` : ''}`;

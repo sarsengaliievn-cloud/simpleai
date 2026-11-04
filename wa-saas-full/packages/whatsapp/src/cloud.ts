@@ -2,6 +2,7 @@ import type {
   WhatsAppProvider,
   OutboundTextMessage,
   OutboundTemplateMessage,
+  OutboundMediaMessage,
   SendResult,
   InboundMessage,
   EchoMessage,
@@ -130,6 +131,46 @@ export class CloudApiWhatsAppProvider implements WhatsAppProvider {
     return { providerMessageId: id };
   }
 
+  async sendMedia(message: OutboundMediaMessage): Promise<SendResult & { mediaId: string }> {
+    if (!message.accessToken) {
+      throw new WhatsAppSendError('нет токена', 'no_token', 'Номер WhatsApp не подключён или у него нет токена.', false, true);
+    }
+    // 1. Загрузка файла в Meta — multipart, как требует /media.
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', message.mimeType);
+    form.append('file', new Blob([new Uint8Array(message.data)], { type: message.mimeType }), message.fileName ?? 'file');
+    let uploaded: { id?: string } & GraphError;
+    let status = 0;
+    try {
+      const response = await fetch(`${graphBase()}/${message.phoneNumberId}/media`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${message.accessToken}` },
+        body: form,
+        signal: AbortSignal.timeout(60_000),
+      });
+      status = response.status;
+      uploaded = (await response.json().catch(() => ({}))) as { id?: string } & GraphError;
+      if (!response.ok || uploaded.error) throw explain(status, uploaded);
+    } catch (error) {
+      if (error instanceof WhatsAppSendError) throw error;
+      throw new WhatsAppSendError(`загрузка: ${(error as Error).message}`, 'network', 'Не удалось загрузить файл в WhatsApp — попробуйте ещё раз.', true);
+    }
+    if (!uploaded.id) throw new WhatsAppSendError('нет id файла', 'no_id', 'WhatsApp не принял файл.', true);
+
+    // 2. Само сообщение со ссылкой на загруженный файл.
+    const media: Record<string, string> = { id: uploaded.id };
+    if (message.caption) media.caption = message.caption;
+    if (message.kind === 'document' && message.fileName) media.filename = message.fileName;
+    const data = await this.call<{ messages?: Array<{ id: string }> }>(`${message.phoneNumberId}/messages`, message, {
+      method: 'POST',
+      body: { messaging_product: 'whatsapp', recipient_type: 'individual', to: message.to, type: message.kind, [message.kind]: media },
+    });
+    const id = data.messages?.[0]?.id;
+    if (!id) throw new WhatsAppSendError('нет id в ответе', 'no_id', 'WhatsApp не подтвердил отправку.', true);
+    return { providerMessageId: id, mediaId: uploaded.id };
+  }
+
   async sendTemplate(message: OutboundTemplateMessage): Promise<SendResult> {
     const data = await this.call<{ messages?: Array<{ id: string }> }>(`${message.phoneNumberId}/messages`, message, {
       method: 'POST',
@@ -213,8 +254,8 @@ export class CloudApiWhatsAppProvider implements WhatsAppProvider {
     });
   }
 
-  async downloadMedia({ mediaId, accessToken }: { mediaId: string; accessToken: string | null }): Promise<DownloadedMedia> {
+  async downloadMedia({ mediaId, accessToken, maxBytes }: { mediaId: string; accessToken: string | null; maxBytes?: number }): Promise<DownloadedMedia> {
     if (!accessToken) throw new Error('Нет токена WhatsApp-аккаунта для скачивания файла');
-    return downloadCloudMedia(mediaId, accessToken);
+    return downloadCloudMedia(mediaId, accessToken, maxBytes);
   }
 }

@@ -17,6 +17,7 @@ import {
   markWhatsAppRead,
   sendErrorText,
   type AiReplyJob,
+  aiErrorReason,
 } from '@wa/core';
 import { getProvider } from '@wa/whatsapp';
 
@@ -24,6 +25,8 @@ type Db = ReturnType<typeof forCompany>;
 
 /** Сообщение «вне графика» — не чаще раза в 12 часов на диалог, иначе это спам. */
 const OFF_HOURS_REPEAT_MS = 12 * 60 * 60 * 1000;
+/** Ответ на фото — не чаще раза в 2 часа; следующее фото уже к менеджеру. */
+const PHOTO_REPEAT_MS = 2 * 60 * 60 * 1000;
 
 /** Вложения, которые ассистент не видит, — на них отвечает человек. */
 const NEEDS_EYES = new Set(['IMAGE', 'VIDEO', 'DOCUMENT', 'LOCATION']);
@@ -94,7 +97,31 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
   // ── Вложения, которых ассистент не понимает ─
   // Фото с подписью «такие есть?» тоже сюда: без картинки ассистент
   // ответил бы наугад, а это ровно то, что запрещает базовое правило.
-  const attachment = tail.find((m) => (m.type === 'AUDIO' && !m.text) || NEEDS_EYES.has(m.type));
+  // Фото и задан «ответ на фото» — бот сам отвечает (каталог, просьба написать
+  // артикул) и ведёт разговор дальше. Повторное фото в течение 2 часов —
+  // значит, клиент так и не нашёл модель: зовём человека.
+  const blind = (m: (typeof tail)[number]) => (m.type === 'AUDIO' && !m.text) || NEEDS_EYES.has(m.type);
+  const photoReply = config.photoReply.trim();
+  if (photoReply && tail.some((m) => m.type === 'IMAGE') && !tail.some((m) => blind(m) && m.type !== 'IMAGE')) {
+    const recent = await db.message.findFirst({
+      where: { conversationId, authorType: 'AI', createdAt: { gte: new Date(Date.now() - PHOTO_REPEAT_MS) }, metadata: { path: ['photoReply'], equals: true } },
+      select: { id: true },
+    });
+    if (!recent) {
+      const outcome = await sendAsAssistant(db, conversationId, photoReply, { photoReply: true });
+      if (typeof outcome === 'object') {
+        await handOff(db, conversationId, `Ассистент хотел ответить на фото, но WhatsApp не принял сообщение: ${outcome.reason} Диалог передан менеджеру.`, { error: outcome.error });
+      } else if (outcome === 'sent' && last.providerMessageId && conversation.phoneNumber) {
+        await markWhatsAppRead(db, { phoneNumberRowId: conversation.phoneNumber.id, providerMessageId: last.providerMessageId });
+      }
+      console.log(`[ai] ${conversationId}: фото — отправлен ответ на фото (${outcome === 'sent' ? 'ок' : 'не ушёл'})`);
+      return;
+    }
+    await handOff(db, conversationId, 'Клиент снова прислал фото — похоже, сам модель не нашёл. Диалог передан менеджеру.', { attachment: 'IMAGE', repeat: true });
+    return;
+  }
+
+  const attachment = tail.find(blind);
   if (attachment) {
     const what = attachment.type;
     await handOff(db, conversationId, ATTACHMENT_REASON[what] ?? 'Клиент прислал вложение', { attachment: what });
@@ -112,6 +139,10 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     .map((m) => ({ role: m.direction === 'INBOUND' ? ('user' as const) : ('assistant' as const), content: m.text! }));
 
   const result = await answerQuestion({ companyId, company, config, question, history });
+  // ИИ снова отвечает — плашка «ИИ не работает» больше не нужна.
+  if (config.lastErrorAt) {
+    await db.aIConfiguration.updateMany({ data: { lastErrorAt: null, lastError: null } });
+  }
   // Списание за ответ — даже если бот в итоге позвал менеджера: модель отработала.
   await recordUsage(companyId, 'reply', {
     provider: billingProvider(result.ai),
@@ -318,4 +349,19 @@ async function transcribeVoice(
     });
     return null;
   }
+}
+
+/**
+ * Ответ так и не получился после всех повторов (ключ, модель, сбой у
+ * провайдера). Раньше диалог оставался «у бота» и клиент ждал вечно —
+ * теперь он сразу уходит менеджеру с понятной причиной, а в панели
+ * загорается плашка «ИИ не работает».
+ */
+export async function aiReplyFailed({ companyId, conversationId }: AiReplyJob, error: Error) {
+  const db = forCompany(prisma, companyId);
+  const config = await db.aIConfiguration.findFirst();
+  const reason = aiErrorReason(error.message, config?.aiModel ?? null);
+  await db.aIConfiguration.updateMany({ data: { lastErrorAt: new Date(), lastError: reason } });
+  await handOff(db, conversationId, `Ассистент не смог ответить: ${reason}. Диалог передан менеджеру.`, { aiError: reason });
+  console.error(`[ai] ${conversationId}: сбой ИИ после повторов (${reason}) — передано менеджеру`);
 }

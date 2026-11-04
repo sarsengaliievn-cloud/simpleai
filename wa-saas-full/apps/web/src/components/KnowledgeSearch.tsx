@@ -19,7 +19,7 @@ export function KnowledgeSearch() {
         body: JSON.stringify({ question: q }),
       });
       const json = await res.json();
-      if (!res.ok) setError(json.error);
+      if (!res.ok) setError(json.error + (json.detail ? ` — ${json.detail}` : ''));
       else setData(json);
     } catch {
       setError('Не удалось выполнить запрос');

@@ -25,10 +25,11 @@ export default async function AssistantPage({ searchParams }: Props) {
     extraRules: '', confidenceThreshold: 70, advancedMode: false, advancedPrompt: '',
     replyDelaySec: 8, splitReplies: true, splitMaxChars: 350,
     workingHoursEnabled: false, workingDays: [1, 2, 3, 4, 5, 6, 7], workStart: '09:00', workEnd: '21:00',
-    offHoursMessage: '', transcribeVoice: true,
+    offHoursMessage: '', transcribeVoice: true, photoReply: '', lastErrorAt: null, lastError: null,
   };
 
   const preview = buildSystemPrompt(config, company);
+  const hasLinks = /https?:\/\/|www\.|\.(kz|com|app|ru)\//i.test([...config.goals, config.forbidden, config.extraRules].join(' '));
   const choice = resolveAI('aiProvider' in config ? config : null);
   const ai = aiLabel(choice);
 
@@ -45,15 +46,15 @@ export default async function AssistantPage({ searchParams }: Props) {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
       <div className="main">
         <header className="top">
           <div className="top-t"><h1>Как отвечает ассистент</h1><p className="top-hint">Как бот разговаривает с клиентами: тон, правила, рабочие часы</p></div>
           <span className="chip" style={{ marginLeft: 'auto', flex: 'none' }} title={`Модель: ${ai.model}`}>
             {ai.provider} · {ai.model}
           </span>
-          <span className={`chip ${config.enabled ? 'chip-ok' : ''}`} style={{ flex: 'none' }}>
-            <span className="dot" />{config.enabled ? 'Отвечает клиентам' : 'Выключен'}
+          <span className={`chip ${company.aiError ? 'chip-bad' : config.enabled ? 'chip-ok' : ''}`} style={{ flex: 'none' }}>
+            <span className="dot" />{company.aiError ? 'Сбой ИИ' : config.enabled ? 'Отвечает клиентам' : 'Выключен'}
           </span>
         </header>
 
@@ -61,6 +62,18 @@ export default async function AssistantPage({ searchParams }: Props) {
           {saved && (
             <div className="chip chip-ok" style={{ height: 'auto', padding: '9px 12px', marginBottom: 16, display: 'block' }}>
               Настройки сохранены — ассистент уже работает по ним.
+            </div>
+          )}
+          {hasLinks && (
+            <div className="notice notice-warn" style={{ marginBottom: 16 }}>
+              В правилах есть ссылки. Ассистент <b>не открывает сайты</b> — он может только отправить ссылку клиенту.
+              Цены, размеры, акции и наличие, которые он должен знать, добавьте в «Базу знаний».
+            </div>
+          )}
+          {company.aiError && (
+            <div className="notice notice-bad" style={{ marginBottom: 16 }}>
+              <b>ИИ сейчас не отвечает клиентам: {company.aiError}.</b> Пока это не исправлено, бот передаёт всех клиентов менеджерам.
+              Выберите другую модель ниже и проверьте в «Тестовом чате» — плашка исчезнет после первого успешного ответа.
             </div>
           )}
           <ModelPicker options={options} current={{ provider: choice.provider, model: choice.model }} />
@@ -81,7 +94,8 @@ export default async function AssistantPage({ searchParams }: Props) {
             <div className="card card-p" style={{ marginBottom: 16 }}>
               <label className="field">
                 <span className="label">Роль</span>
-                <input className="input" name="role" defaultValue={config.role} />
+                <input className="input" name="role" defaultValue={config.role} placeholder="онлайн-консультант магазина обуви SHOQAI" />
+                <span className="hint">Кто отвечает клиенту — без «Ты —». Например: «онлайн-консультант магазина обуви SHOQAI».</span>
               </label>
 
               <label className="field">
@@ -199,6 +213,17 @@ export default async function AssistantPage({ searchParams }: Props) {
                           defaultValue={config.offHoursMessage}
                           placeholder="Сообщение вне графика (необязательно). Например: Спасибо! Мы работаем с 9:00 до 21:00 — ответим утром." />
                 <span className="hint">Уходит клиенту один раз, не чаще раза в 12 часов. Пусто — ассистент просто молчит.</span>
+              </div>
+
+              <div className="field">
+                <span className="label">Когда клиент прислал фото</span>
+                <textarea className="textarea" name="photoReply" style={{ minHeight: 80 }} defaultValue={config.photoReply}
+                          placeholder="Например: Рақмет! Каталогымыз: https://sklad-obuv.web.app/shop/ — модельдің артикулын жазыңызшы, бар-жоғын тексеріп берем." />
+                <span className="hint">
+                  Ассистент не видит фото. С этим текстом он сам ответит клиенту — например, даст ссылку на каталог и попросит
+                  артикул, — и продолжит разговор. Если клиент снова присылает фото в течение 2 часов, диалог уходит менеджеру.
+                  Пусто — фото сразу передаётся менеджеру.
+                </span>
               </div>
             </div>
 

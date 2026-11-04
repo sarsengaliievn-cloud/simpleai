@@ -29,7 +29,7 @@ export async function saveAssistant(formData: FormData): Promise<void> {
 
   const data = {
     enabled: formData.get('enabled') === 'on',
-    role: String(formData.get('role') ?? '').trim().slice(0, 200) || 'Консультант компании',
+    role: String(formData.get('role') ?? '').trim().replace(/^ты\s*[—–-]\s*/i, '').slice(0, 200) || 'Консультант компании',
     tone: TONES.includes(tone) ? tone : 'Дружелюбный',
     goals: String(formData.get('goals') ?? '').split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 20),
     // Без языков инструкция получала бы «отвечай на языке клиента ()».
@@ -53,6 +53,7 @@ export async function saveAssistant(formData: FormData): Promise<void> {
     workEnd: TIME_RE.test(workEnd) ? workEnd : '21:00',
     offHoursMessage: String(formData.get('offHoursMessage') ?? '').trim().slice(0, 1000),
     transcribeVoice: formData.get('transcribeVoice') === 'on',
+    photoReply: String(formData.get('photoReply') ?? '').trim().slice(0, 2000),
   };
 
   const existing = await db.aIConfiguration.findFirst();

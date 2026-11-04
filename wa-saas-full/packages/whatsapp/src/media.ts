@@ -12,7 +12,8 @@ export const MAX_MEDIA_BYTES = 16 * 1024 * 1024;
 
 export type DownloadedMedia = { data: Buffer; mimeType: string };
 
-export async function downloadCloudMedia(mediaId: string, accessToken: string): Promise<DownloadedMedia> {
+export async function downloadCloudMedia(mediaId: string, accessToken: string, maxBytes = MAX_MEDIA_BYTES): Promise<DownloadedMedia> {
+  const limitMb = Math.round(maxBytes / 1024 / 1024);
   if (!/^\d+$/.test(mediaId)) throw new Error('Некорректный media id');
 
   const meta = await fetch(`${graphBase()}/${mediaId}`, {
@@ -22,13 +23,13 @@ export async function downloadCloudMedia(mediaId: string, accessToken: string): 
 
   const info = (await meta.json()) as { url?: string; mime_type?: string; file_size?: number };
   if (!info.url) throw new Error('Meta не вернула ссылку на файл');
-  if ((info.file_size ?? 0) > MAX_MEDIA_BYTES) throw new Error('Файл больше 16 МБ');
+  if ((info.file_size ?? 0) > maxBytes) throw new Error(`Файл больше ${limitMb} МБ`);
 
   const file = await fetch(info.url, { headers: { authorization: `Bearer ${accessToken}` } });
   if (!file.ok) throw new Error(`Скачивание файла: ${file.status}`);
 
   const data = Buffer.from(await file.arrayBuffer());
-  if (data.length > MAX_MEDIA_BYTES) throw new Error('Файл больше 16 МБ');
+  if (data.length > maxBytes) throw new Error(`Файл больше ${limitMb} МБ`);
 
   return { data, mimeType: info.mime_type ?? file.headers.get('content-type') ?? 'application/octet-stream' };
 }

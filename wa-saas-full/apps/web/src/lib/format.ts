@@ -1,13 +1,15 @@
 const AVATAR_COLORS = ['#0B6E4F', '#1B4B7A', '#B4690E', '#6B3FA0', '#B42318', '#0E7490'];
 
 export function initials(name: string | null, fallback: string) {
-  const source = name?.trim() || fallback;
-  return source
-    .split(/\s+/)
-    .map((w) => w[0])
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
+  // NFKC превращает «𝑆𝑎𝐷𝑦𝐾𝑜𝑉» и прочие стилизованные шрифты в обычные буквы;
+  // Array.from не режет символ пополам (раньше вместо буквы был «�»).
+  const clean = (name ?? '').normalize('NFKC').trim();
+  const words = clean.split(/\s+/).map((w) => Array.from(w).find((ch) => /\p{L}/u.test(ch))).filter(Boolean) as string[];
+  if (words.length > 0) return words.slice(0, 2).join('').toUpperCase();
+  // Имени нет или это номер телефона — две последние цифры вместо «+».
+  const digits = (clean || fallback).replace(/\D/g, '');
+  if (digits.length >= 2) return digits.slice(-2);
+  return Array.from(fallback).slice(0, 2).join('').toUpperCase();
 }
 
 export function avatarColor(seed: string) {

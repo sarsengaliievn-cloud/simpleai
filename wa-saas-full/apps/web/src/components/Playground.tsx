@@ -53,7 +53,7 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
               parts: Array.isArray(json.parts) && json.answer && !json.needsHuman ? json.parts : undefined,
               sources: [...new Set<string>(json.hits?.slice(0, 3).map((h: { title: string }) => h.title) ?? [])].slice(0, 2),
             }
-          : { role: 'assistant', content: json.error ?? `Ошибка ${res.status}`, service: true },
+          : { role: 'assistant', content: (json.error ?? `Ошибка ${res.status}`) + (json.detail ? `\n\nПодробно: ${json.detail}` : ''), service: true },
       ]);
     } catch {
       setTurns((prev) => [...prev, { role: 'assistant', content: 'Сеть недоступна', service: true }]);

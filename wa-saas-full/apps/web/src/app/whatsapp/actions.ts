@@ -77,6 +77,8 @@ export async function completeEmbeddedSignup(input: {
   code: string;
   wabaId: string;
   phoneNumberId: string;
+  /** Номер из приложения WhatsApp Business (QR, Coexistence) — регистрировать не нужно. */
+  coexistence?: boolean;
 }) {
   const { company, db, user } = await requireCompany('whatsapp:manage');
 
@@ -122,16 +124,20 @@ export async function completeEmbeddedSignup(input: {
 
   // 3. Регистрация номера в Cloud API. PIN двухфакторной защиты задаём сами
   //    и храним у себя — Meta спросит его при повторной регистрации.
-  const pin = String(Math.floor(100000 + Math.random() * 900000));
-  const register = await fetch(`${GRAPH}/${input.phoneNumberId}/register`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', pin }),
-  });
-  if (!register.ok) {
-    const body = await register.text();
-    console.error('[embedded-signup] регистрация номера не удалась', body);
-    // Номер мог быть зарегистрирован ранее — это не повод терять подключение.
+  //    Номер из приложения WhatsApp Business (Coexistence) не регистрируем:
+  //    он уже работает, а регистрация отвязала бы его от телефона.
+  if (!input.coexistence) {
+    const pin = String(Math.floor(100000 + Math.random() * 900000));
+    const register = await fetch(`${GRAPH}/${input.phoneNumberId}/register`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', pin }),
+    });
+    if (!register.ok) {
+      const body = await register.text();
+      console.error('[embedded-signup] регистрация номера не удалась', body);
+      // Номер мог быть зарегистрирован ранее — это не повод терять подключение.
+    }
   }
 
   // 4. Подтягиваем данные номера для интерфейса.
@@ -208,7 +214,7 @@ export async function completeEmbeddedSignup(input: {
       entityType: 'WhatsAppPhoneNumber',
       entityId: input.phoneNumberId,
       actorUserId: user.id,
-      metadata: { via: 'embedded_signup', wabaId: input.wabaId, company: company.name },
+      metadata: { via: input.coexistence ? 'embedded_signup_coexistence' : 'embedded_signup', wabaId: input.wabaId, company: company.name },
     } as never,
   });
 
@@ -255,6 +261,12 @@ export async function connectNumber(formData: FormData) {
       const text = error instanceof WhatsAppSendError ? error.userMessage : 'Meta не ответила — попробуйте ещё раз.';
       return { ok: false as const, error: `Проверка номера в Meta не прошла: ${text}` };
     }
+
+    // Номер должен лежать именно в этом WhatsApp-аккаунте. Иначе можно
+    // перепутать ID и подключить чужой номер из того же бизнеса — и бот
+    // начнёт отвечать его клиентам.
+    const check = await checkNumberInWaba(wabaId, phoneNumberId, token);
+    if (!check.ok) return { ok: false as const, error: check.error };
 
     if (pin) {
       try {
@@ -323,6 +335,43 @@ export async function connectNumber(formData: FormData) {
 
   revalidatePath('/whatsapp');
   return { ok: true as const, display: displayPhoneNumber, verifiedName: info?.verifiedName ?? null };
+}
+
+async function checkNumberInWaba(wabaId: string, phoneNumberId: string, token: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  let data: { data?: Array<{ id: string; display_phone_number?: string }>; error?: { message?: string; error_subcode?: number } };
+  try {
+    const res = await fetch(`${GRAPH}/${wabaId}/phone_numbers?fields=id,display_phone_number&limit=100`, {
+      headers: { authorization: `Bearer ${token}` },
+      cache: 'no-store',
+    });
+    data = await res.json();
+  } catch {
+    return { ok: false, error: 'Meta не ответила при проверке WhatsApp-аккаунта — попробуйте ещё раз.' };
+  }
+  if (!Array.isArray(data.data) && /2388339|not supported for this WhatsApp Business account/i.test(JSON.stringify(data))) {
+    return {
+      ok: false,
+      error:
+        'Этот номер работает в приложении WhatsApp Business и не подключён к API. Вручную его не подключить — ' +
+        'используйте кнопку «Подключить WhatsApp Business» с галочкой «Номер уже работает в приложении»: Meta подключит его по QR-коду.',
+    };
+  }
+  if (!Array.isArray(data.data)) {
+    return {
+      ok: false,
+      error:
+        'Это не WhatsApp Business Account ID, или у токена нет к нему доступа. Возьмите число после «waba_id=» в адресе WhatsApp Manager ' +
+        'и проверьте, что системному пользователю назначен именно этот WhatsApp-аккаунт.',
+    };
+  }
+  if (!data.data.some((n) => n.id === phoneNumberId)) {
+    const list = data.data.map((n) => n.display_phone_number).filter(Boolean).join(', ');
+    return {
+      ok: false,
+      error: `Этот Phone Number ID не из указанного WhatsApp-аккаунта.${list ? ` В нём номера: ${list}.` : ''} Проверьте, что оба ID относятся к одному номеру.`,
+    };
+  }
+  return { ok: true };
 }
 
 export async function disconnectNumber(numberId: string) {

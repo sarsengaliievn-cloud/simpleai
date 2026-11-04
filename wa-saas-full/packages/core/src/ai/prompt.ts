@@ -34,6 +34,17 @@ const SPLIT_HINT =
   'Если ответ получается длинным, раздели его пустой строкой на 2–3 смысловые части — ' +
   'клиент получит их отдельными сообщениями, как от живого менеджера.';
 
+/**
+ * «Ты — {роль} компании «X».» Люди часто пишут в поле роли целую фразу:
+ * «Ты — консультант магазина SHOQAI». Тогда «Ты —» и «компании «X»» не
+ * дублируем — иначе модель получала «Ты — Ты — консультант … компании …».
+ */
+export function roleLine(rawRole: string, companyName: string) {
+  const role = rawRole.trim().replace(/^ты\s*[—–-]\s*/i, '').replace(/[.!]+$/, '').trim() || 'консультант';
+  const mentionsCompany = /компани|магазин|бренд|салон/i.test(role) || role.toLowerCase().includes(companyName.toLowerCase());
+  return mentionsCompany ? `Ты — ${role}.` : `Ты — ${role} компании «${companyName}».`;
+}
+
 export function buildSystemPrompt(config: AIConfigLike, company: { name: string; description?: string | null; city?: string | null }) {
   if (config.advancedMode && config.advancedPrompt.trim()) {
     return [config.advancedPrompt.trim(), HARD_RULE, config.splitReplies ? SPLIT_HINT : '', FORMAT]
@@ -43,7 +54,7 @@ export function buildSystemPrompt(config: AIConfigLike, company: { name: string;
   const languages = config.languages.map((l) => LANG[l] ?? l).join(', ');
 
   return [
-    `Ты — ${config.role} компании «${company.name}».`,
+    roleLine(config.role, company.name),
     company.description ? `О компании: ${company.description}` : '',
     company.city ? `Город: ${company.city}.` : '',
     '',

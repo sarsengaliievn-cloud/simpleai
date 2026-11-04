@@ -20,6 +20,17 @@ export interface OutboundTemplateMessage extends SendAuth {
   variables?: string[];
 }
 
+/** Фото, видео или файл от менеджера. Файл сначала загружается в Meta, потом уходит по её id. */
+export interface OutboundMediaMessage extends SendAuth {
+  phoneNumberId: string;
+  to: string;
+  kind: 'image' | 'video' | 'document';
+  data: Buffer;
+  mimeType: string;
+  fileName?: string;
+  caption?: string;
+}
+
 export interface SendResult {
   providerMessageId: string;
 }
@@ -33,6 +44,8 @@ export interface InboundMessage {
   text?: string;
   mediaId?: string;
   mediaMimeType?: string;
+  /** Имя файла у документа. */
+  fileName?: string;
   timestamp: Date;
 }
 
@@ -50,6 +63,7 @@ export interface EchoMessage {
   text?: string;
   mediaId?: string;
   mediaMimeType?: string;
+  fileName?: string;
   timestamp: Date;
 }
 
@@ -80,6 +94,8 @@ export interface WhatsAppProvider {
   readonly name: string;
   sendText(message: OutboundTextMessage): Promise<SendResult>;
   sendTemplate(message: OutboundTemplateMessage): Promise<SendResult>;
+  /** Загрузить файл в Meta и отправить его клиенту. */
+  sendMedia(message: OutboundMediaMessage): Promise<SendResult & { mediaId: string }>;
   verifySignature(rawBody: string, signatureHeader: string | null): boolean;
   parseWebhook(payload: unknown): InboundMessage[];
   parseStatuses(payload: unknown): StatusUpdate[];
@@ -94,7 +110,7 @@ export interface WhatsAppProvider {
   /** Регистрация номера в Cloud API (PIN двухэтапной проверки). */
   registerNumber(input: SendAuth & { phoneNumberId: string; pin: string }): Promise<void>;
   /** Вложение из входящего сообщения (голосовое, фото). Токен — WABA компании. */
-  downloadMedia(params: { mediaId: string; accessToken: string | null }): Promise<{ data: Buffer; mimeType: string }>;
+  downloadMedia(params: { mediaId: string; accessToken: string | null; maxBytes?: number }): Promise<{ data: Buffer; mimeType: string }>;
 }
 
 /**

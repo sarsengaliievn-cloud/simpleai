@@ -16,7 +16,7 @@ export function CreditForm({ companyId }: { companyId: string }) {
       </select>
       <input name="amount" className="input" inputMode="decimal" placeholder="₸" aria-label="Сумма, ₸" required />
       <input name="note" className="input" placeholder="Заметка" aria-label="Заметка" style={{ width: 140 }} />
-      XX
+      <button className="btn btn-primary btn-sm" type="submit" disabled={pending}>{pending ? '…' : 'Зачислить'}</button>
       {state?.ok && <span className="tiny adm-msg" style={{ color: 'var(--pine)' }}>{state.ok}</span>}
       {state?.error && <span className="tiny danger adm-msg">{state.error}</span>}
     </form>

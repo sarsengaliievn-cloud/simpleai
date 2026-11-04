@@ -193,7 +193,7 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
         providerMessageId: inbound.providerMessageId,
         status: 'DELIVERED',
         sentAt: inbound.timestamp,
-        metadata: inbound.mediaId ? { mediaId: inbound.mediaId } : undefined,
+        metadata: inbound.mediaId ? { mediaId: inbound.mediaId, ...(inbound.fileName ? { fileName: inbound.fileName } : {}) } : undefined,
       } as never,
       select: { id: true },
     });
@@ -287,7 +287,7 @@ async function handleEcho(echo: EchoMessage): Promise<string | null> {
         providerMessageId: echo.providerMessageId,
         status: 'SENT',
         sentAt: echo.timestamp,
-        metadata: { source: 'phone', ...(echo.mediaId ? { mediaId: echo.mediaId } : {}) },
+        metadata: { source: 'phone', ...(echo.mediaId ? { mediaId: echo.mediaId } : {}), ...(echo.fileName ? { fileName: echo.fileName } : {}) },
       } as never,
     });
   } catch (error) {

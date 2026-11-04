@@ -114,6 +114,7 @@ model Company {
   aiUsage            AiUsage[]
   balanceTransactions BalanceTransaction[]
   topupRequests      TopupRequest[]
+  quickReplies       QuickReply[]
 
   @@map("companies")
 }
@@ -431,6 +432,12 @@ model AIConfiguration {
   /// Расшифровывать голосовые и отвечать на них как на текст.
   transcribeVoice Boolean @default(true)
 
+  /// Ответ бота на фото от клиента (каталог + просьба написать артикул). Пусто — фото сразу менеджеру.
+  photoReply     String  @default("")
+  /// Последний сбой ИИ (понятная причина). Сбрасывается первым успешным ответом.
+  lastErrorAt    DateTime?
+  lastError      String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -658,4 +665,19 @@ model PlatformSetting {
   updatedAt DateTime @updatedAt
 
   @@map("platform_settings")
+}
+
+/// Быстрый ответ: сохранённый текст, который менеджер вставляет одной кнопкой.
+model QuickReply {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  title     String
+  text      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, position])
+  @@map("quick_replies")
 }

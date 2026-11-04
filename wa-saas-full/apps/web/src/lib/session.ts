@@ -31,9 +31,14 @@ export async function requireCompany(permission?: Permission) {
   if (permission && !can(role, permission)) redirect('/conversations');
 
   const own = seesOnlyOwn(role);
+  // Сбой ИИ показываем плашкой в меню на всех страницах, пока бот снова не ответит.
+  const health = await prisma.aIConfiguration.findUnique({
+    where: { companyId: membership.companyId },
+    select: { lastError: true, lastErrorAt: true },
+  });
   return {
     user,
-    company: membership.company,
+    company: { ...membership.company, aiError: health?.lastErrorAt ? health.lastError ?? 'Ассистент не смог ответить' : null },
     role,
     db: forCompany(prisma, membership.companyId),
     /** Фильтр «только свои» для диалогов и сделок; для владельца — пусто. */

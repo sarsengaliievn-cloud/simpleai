@@ -7,7 +7,7 @@ import { prisma } from '@wa/db';
 import { connection } from './redis.js';
 import { processInboundMessage } from './processors/inbound-message.js';
 import { ingestDocument } from './processors/ingest-document.js';
-import { generateAiReply } from './processors/ai-reply.js';
+import { generateAiReply, aiReplyFailed } from './processors/ai-reply.js';
 import { aiReplyQueue } from './queues.js';
 
 const worker = new Worker<InboundMessageJob>(
@@ -28,7 +28,13 @@ const replyWorker = new Worker<AiReplyJob>(
   async (job) => generateAiReply(job.data),
   { connection, concurrency: 10 },
 );
-replyWorker.on('failed', (job, err) => console.error(`[ai] fail ${job?.id}:`, err.message));
+replyWorker.on('failed', (job, err) => {
+  console.error(`[ai] fail ${job?.id}:`, err.message);
+  // Последняя попытка — отдаём клиента человеку, а не оставляем ждать.
+  if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
+    aiReplyFailed(job.data, err).catch((e) => console.error('[ai] не удалось передать менеджеру:', (e as Error).message));
+  }
+});
 
 ingestWorker.on('failed', (job, err) => console.error(`[ingest] fail ${job?.id}:`, err.message));
 

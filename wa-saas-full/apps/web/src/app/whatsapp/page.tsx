@@ -30,7 +30,7 @@ export default async function WhatsAppPage() {
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
       <div className="main">
         <header className="top">
           <div className="top-t"><h1>WhatsApp</h1><p className="top-hint">Номера, на которые пишут клиенты</p></div>

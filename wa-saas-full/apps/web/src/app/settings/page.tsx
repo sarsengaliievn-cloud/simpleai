@@ -1,7 +1,7 @@
 import { requireCompany } from '@/lib/session';
 import { Sidebar } from '@/components/Sidebar';
 import { isSuperAdmin } from '@/lib/admin';
-import { saveCompany } from './actions';
+import { saveCompany, addQuickReply, deleteQuickReply } from './actions';
 import { timeAgo, agoText } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -16,11 +16,14 @@ const ACTIONS: Record<string, string> = {
 export default async function SettingsPage() {
   const { company, db, user, role } = await requireCompany('settings:manage');
 
-  const logs = await db.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 30 });
+  const [logs, quick] = await Promise.all([
+    db.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 30 }),
+    db.quickReply.findMany({ orderBy: { position: 'asc' } }),
+  ]);
 
   return (
     <div className="shell">
-      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} />
+      <Sidebar companyName={company.name} userName={`${user.firstName} ${user.lastName}`} role={role} balance={{ tiyn: company.balanceTiyn, lastTopup: company.lastTopupTiyn }} superAdmin={isSuperAdmin(user.email)} aiError={company.aiError} />
       <div className="main">
         <header className="top"><div className="top-t"><h1>Настройки</h1><p className="top-hint">Данные компании и журнал изменений</p></div></header>
 
@@ -57,6 +60,42 @@ export default async function SettingsPage() {
 
             <button className="btn btn-primary" type="submit">Сохранить</button>
           </form>
+
+          <section className="card card-p" style={{ marginBottom: 16 }} id="quick">
+            <div style={{ fontWeight: 700, marginBottom: 4 }}>Быстрые ответы</div>
+            <p className="small muted" style={{ marginBottom: 14 }}>
+              Тексты, которые менеджеры отправляют чаще всего: ссылка на каталог, акции, адреса, реквизиты.
+              В переписке — кнопка ⚡ или «/» в начале сообщения.
+            </p>
+            {quick.length > 0 && (
+              <ul className="qr-list">
+                {quick.map((q) => (
+                  <li key={q.id}>
+                    <div style={{ minWidth: 0 }}>
+                      <b>{q.title}</b>
+                      <div className="small muted qr-text">{q.text}</div>
+                    </div>
+                    <form action={deleteQuickReply}>
+                      <input type="hidden" name="id" value={q.id} />
+                      <button className="btn btn-quiet btn-sm danger" type="submit">Удалить</button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form action={addQuickReply}>
+              <label className="field">
+                <span className="label">Название</span>
+                <input className="input" name="title" required maxLength={60} placeholder="Каталог и акция" />
+              </label>
+              <label className="field">
+                <span className="label">Текст</span>
+                <textarea className="textarea" name="text" required maxLength={4000} style={{ minHeight: 90 }}
+                          placeholder="https://sklad-obuv.web.app/shop/ — каталогтан өз размеріңізді таңдап, маған жіберіңіз…" />
+              </label>
+              <button className="btn" type="submit">Добавить ответ</button>
+            </form>
+          </section>
 
           <div className="card" style={{ overflow: 'hidden' }}>
             <div className="card-p" style={{ borderBottom: '1px solid var(--line)', fontWeight: 700 }}>

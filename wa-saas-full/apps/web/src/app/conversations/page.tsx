@@ -10,6 +10,10 @@ import { loadDeal, loadMembers, loadStages } from '@/lib/crm';
 
 export const dynamic = 'force-dynamic';
 
+const ATTACH_PREVIEW: Record<string, string> = {
+  IMAGE: '📷 Фото', VIDEO: '🎥 Видео', DOCUMENT: '📄 Файл', AUDIO: '🎤 Голосовое', LOCATION: '📍 Геолокация', UNSUPPORTED: 'Стикер или реакция',
+};
+
 type Props = { searchParams: Promise<{ id?: string; filter?: string; q?: string }> };
 
 export default async function ConversationsPage({ searchParams }: Props) {
@@ -54,7 +58,9 @@ export default async function ConversationsPage({ searchParams }: Props) {
     },
   });
 
-  const activeId = id ?? conversations[0]?.id ?? null;
+  // Мусор в ?id= (старая ссылка, «undefined») раньше ронял страницу ошибкой базы.
+  const validId = id && /^[0-9a-f-]{36}$/i.test(id) ? id : undefined;
+  const activeId = validId ?? conversations[0]?.id ?? null;
 
   const active = activeId
     ? await db.conversation.findFirst({
@@ -65,6 +71,8 @@ export default async function ConversationsPage({ searchParams }: Props) {
         },
       })
     : null;
+
+  const quickReplies = active ? await db.quickReply.findMany({ orderBy: { position: 'asc' }, select: { id: true, title: true, text: true } }) : [];
 
   const [stages, deal, members] = active
     ? await Promise.all([
@@ -80,7 +88,7 @@ export default async function ConversationsPage({ searchParams }: Props) {
       title="Диалоги"
       hint={seesOnlyOwn ? 'Клиенты, которых вам передали' : 'Переписка с клиентами. Справа — сделка: этап, менеджер, заказ'}
     >
-      <div className="inbox">
+      <div className={`inbox ${validId ? 'has-open' : 'no-open'}`}>
         <ConversationList
           filter={filter}
           query={query}
@@ -88,8 +96,8 @@ export default async function ConversationsPage({ searchParams }: Props) {
           showNew={!seesOnlyOwn}
           items={conversations.map((c) => ({
             id: c.id,
-            name: c.customer.name ?? `+${c.customer.waId}`,
-            preview: c.messages[0]?.text ?? 'Вложение',
+            name: c.customer.name || `+${c.customer.waId}`,
+            preview: c.messages[0]?.text ?? ATTACH_PREVIEW[c.messages[0]?.type ?? ''] ?? 'Вложение',
             lastMessageAt: c.lastMessageAt,
             unread: c.unreadCount,
             mode: c.mode,
@@ -101,12 +109,14 @@ export default async function ConversationsPage({ searchParams }: Props) {
 
         {active ? (
           <ThreadView
+            quickReplies={quickReplies}
+            backHref={`/conversations?${new URLSearchParams({ filter, ...(query ? { q: query } : {}) })}`}
             conversation={{
               id: active.id,
               mode: active.mode,
               windowOpen: isWindowOpen(active.windowExpiresAt),
               windowExpiresAt: active.windowExpiresAt,
-              customerName: active.customer.name ?? `+${active.customer.waId}`,
+              customerName: active.customer.name || `+${active.customer.waId}`,
               customerPhone: active.customer.phone,
               customerCity: active.customer.city,
             }}
@@ -120,6 +130,9 @@ export default async function ConversationsPage({ searchParams }: Props) {
               errorCode: m.errorCode,
               createdAt: m.createdAt,
               fromPhone: (m.metadata as { source?: string } | null)?.source === 'phone',
+              media: (m.metadata as { mediaId?: string } | null)?.mediaId
+                ? { fileName: (m.metadata as { fileName?: string }).fileName ?? null, mime: m.mediaMimeType }
+                : null,
             }))}
           />
         ) : (

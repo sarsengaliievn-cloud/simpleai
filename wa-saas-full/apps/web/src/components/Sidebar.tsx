@@ -52,6 +52,7 @@ export function Sidebar({
   role = 'OWNER',
   balance,
   superAdmin = false,
+  aiError = null,
 }: {
   companyName: string;
   userName?: string;
@@ -60,6 +61,8 @@ export function Sidebar({
   balance?: { tiyn: number; lastTopup: number };
   /** Владелец платформы — видит ссылку на админку всех компаний. */
   superAdmin?: boolean;
+  /** Последний сбой ИИ — бот сейчас не отвечает клиентам. */
+  aiError?: string | null;
 }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
@@ -125,6 +128,12 @@ export function Sidebar({
             </div>
           )}
         </nav>
+
+        {aiError && ADMINS.includes(role) && !path.startsWith('/assistant') && (
+          <Link href="/assistant" className="side-alert bad">
+            ИИ не работает: {aiError}. Клиентов передаёт менеджерам. Открыть настройки
+          </Link>
+        )}
 
         {(empty || low) && !path.startsWith('/billing') && (
           <Link href="/billing" className={`side-alert ${empty ? 'bad' : ''}`}>

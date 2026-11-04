@@ -1,5 +1,5 @@
 import { requireCompany } from '@/lib/session';
-import { answerQuestion, splitReply, hasBalance, recordUsage, billingProvider, formatTiyn } from '@wa/core';
+import { answerQuestion, splitReply, hasBalance, recordUsage, billingProvider, formatTiyn, aiErrorReason } from '@wa/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +51,7 @@ export async function POST(request: Request) {
       question,
       history,
     });
+    if (config.lastErrorAt) await db.aIConfiguration.updateMany({ data: { lastErrorAt: null, lastError: null } });
 
     const charged = await recordUsage(company.id, 'playground', {
       provider: billingProvider(result.ai),
@@ -79,19 +80,11 @@ export async function POST(request: Request) {
   } catch (error) {
     // Наружу — человеческий текст, подробности в логи.
     console.error('[ask] сбой', error);
-    const message = aiErrorText((error as Error).message);
-    return Response.json({ error: message }, { status: 503 });
+    const raw = (error as Error).message ?? '';
+    const reason = aiErrorReason(raw, config.aiModel);
+    await db.aIConfiguration.updateMany({ data: { lastErrorAt: new Date(), lastError: reason } }).catch(() => {});
+    // Владельцу — причина и короткая техническая деталь: так сразу видно, что чинить.
+    return Response.json({ error: reason, detail: raw.slice(0, 300) }, { status: 503 });
   }
 }
 
-/** Понятная причина сбоя ИИ для владельца — по тексту ошибки провайдера. */
-function aiErrorText(raw: string) {
-  const provider = /openai/i.test(raw) ? 'OpenAI' : /gemini|google/i.test(raw) ? 'Gemini' : 'ИИ';
-  if (raw.includes('API_KEY') || /не задан/i.test(raw)) return `Не задан ключ ${provider} на сервере (.env.production)`;
-  if (/\b401\b|invalid_api_key|API key not valid|Incorrect API key/i.test(raw)) {
-    return `Ключ ${provider} на сервере неверный — проверьте его в .env.production и перезапустите сервер`;
-  }
-  if (/insufficient_quota|billing|exceeded your current quota/i.test(raw)) return `На счету ${provider} закончились деньги — пополните баланс у провайдера`;
-  if (/\b429\b|rate limit|RESOURCE_EXHAUSTED/i.test(raw)) return `${provider} временно ограничил запросы — попробуйте через минуту`;
-  return 'Ассистент сейчас недоступен. Попробуйте ещё раз.';
-}

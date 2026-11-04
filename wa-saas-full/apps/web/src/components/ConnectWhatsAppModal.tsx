@@ -32,6 +32,9 @@ export function ConnectWhatsAppModal({
   const [note, setNote] = useState<string | null>(null);
   const [sdkReady, setSdkReady] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Номер уже работает в приложении WhatsApp Business на телефоне —
+  // подключаем его по QR (Coexistence), не удаляя из приложения.
+  const [onPhone, setOnPhone] = useState(true);
 
   // Данные из окна Meta приходят отдельным сообщением, а код — в колбэке
   // FB.login. Хранить их нужно в ref, а не в state: колбэк FB.login
@@ -71,7 +74,8 @@ export function ConnectWhatsAppModal({
         };
         if (data.type !== 'WA_EMBEDDED_SIGNUP') return;
 
-        if (data.event === 'FINISH' && data.data?.waba_id && data.data.phone_number_id) {
+        // FINISH — новый номер, FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING — номер из приложения (QR).
+        if (data.event?.startsWith('FINISH') && data.data?.waba_id && data.data.phone_number_id) {
           sessionRef.current = { wabaId: data.data.waba_id, phoneNumberId: data.data.phone_number_id };
         } else if (data.event === 'CANCEL') {
           setError('Подключение отменено в окне Meta');
@@ -102,16 +106,16 @@ export function ConnectWhatsAppModal({
 
   const finish = useCallback(
     async (code: string, wabaId: string, phoneNumberId: string) => {
-      const result = await completeEmbeddedSignup({ code, wabaId, phoneNumberId });
+      const result = await completeEmbeddedSignup({ code, wabaId, phoneNumberId, coexistence: onPhone });
       if (result.ok) { setStep('done'); router.refresh(); }
       else { setError(result.error); setStep('ready'); }
     },
-    [router],
+    [router, onPhone],
   );
 
   const launch = () => {
     if (!window.FB) { setError('Не загрузился скрипт Meta. Проверьте, не блокирует ли его расширение браузера.'); return; }
-    if (!configId) { setError('В .env не задан META_CONFIG_ID — его выдают после одобрения Tech Provider.'); return; }
+    if (!configId) { setError('На сервере не задан META_CONFIG_ID — ID конфигурации «Вход через Facebook для бизнеса».'); return; }
 
     setError(null);
     setStep('connecting');
@@ -141,7 +145,7 @@ export function ConnectWhatsAppModal({
         config_id: configId,
         response_type: 'code',
         override_default_response_type: true,
-        extras: { setup: {}, featureType: '', sessionInfoVersion: '3' },
+        extras: { setup: {}, featureType: onPhone ? 'whatsapp_business_app_onboarding' : '', sessionInfoVersion: '3' },
       },
     );
   };
@@ -193,7 +197,17 @@ export function ConnectWhatsAppModal({
               </div>
             )}
 
-            {note && <p className="hint" style={{ marginBottom: 16 }}>{note}</p>}
+            <label className="row small" style={{ gap: 10, alignItems: 'flex-start', marginBottom: 14, cursor: 'pointer' }}>
+              <input type="checkbox" checked={onPhone} onChange={(e) => setOnPhone(e.target.checked)} disabled={step === 'connecting'} style={{ marginTop: 3 }} />
+              <span>
+                <b>Номер уже работает в приложении WhatsApp Business на телефоне</b>
+                <span className="muted" style={{ display: 'block' }}>
+                  Подключим по QR-коду: номер и переписка останутся в приложении, менеджер сможет отвечать и с телефона.
+                </span>
+              </span>
+            </label>
+
+            {note && !onPhone && <p className="hint" style={{ marginBottom: 16 }}>{note}</p>}
 
             <button
               className="btn btn-primary"
@@ -205,8 +219,9 @@ export function ConnectWhatsAppModal({
             </button>
 
             <p className="hint" style={{ marginTop: 12 }}>
-              Откроется окно Meta — вход в ваш Business-аккаунт и подтверждение доступа.
-              Токен придёт напрямую от Meta, вводить его руками не нужно.
+              {onPhone
+                ? 'Откроется окно Meta: войдите в Facebook, выберите бизнес и номер. В конце Meta покажет QR-код — отсканируйте его в приложении WhatsApp Business на телефоне с этим номером, Meta подскажет, где.'
+                : 'Откроется окно Meta — вход в ваш Business-аккаунт и подтверждение доступа. Токен придёт напрямую от Meta, вводить его руками не нужно.'}
             </p>
           </>
         )}

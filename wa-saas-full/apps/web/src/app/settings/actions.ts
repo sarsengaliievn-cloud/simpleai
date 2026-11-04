@@ -25,3 +25,25 @@ export async function saveCompany(formData: FormData) {
 
   revalidatePath('/settings');
 }
+
+/* ── Быстрые ответы ─────────────────────────────────────────── */
+
+export async function addQuickReply(formData: FormData) {
+  const { db } = await requireCompany('settings:manage');
+  const title = String(formData.get('title') ?? '').trim().slice(0, 60);
+  const text = String(formData.get('text') ?? '').trim().slice(0, 4000);
+  if (!title || !text) return;
+  const count = await db.quickReply.count();
+  if (count >= 50) return;
+  await db.quickReply.create({ data: { title, text, position: count } as never });
+  revalidatePath('/settings');
+  revalidatePath('/conversations');
+}
+
+export async function deleteQuickReply(formData: FormData) {
+  const { db } = await requireCompany('settings:manage');
+  const id = String(formData.get('id') ?? '');
+  await db.quickReply.deleteMany({ where: { id } });
+  revalidatePath('/settings');
+  revalidatePath('/conversations');
+}

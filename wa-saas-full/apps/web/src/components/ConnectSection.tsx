@@ -25,9 +25,9 @@ export function ConnectSection({ appId, configId }: { appId: string; configId: s
 
         {!ready && (
           <p className="hint" style={{ marginTop: 12 }}>
-            Кнопка включится, когда в .env появятся META_APP_ID и META_CONFIG_ID. Их выдают
-            после одобрения статуса Tech Provider — до этого момента подключение возможно
-            только вручную.
+            Кнопка включится, когда на сервере будут заданы META_APP_ID и META_CONFIG_ID
+            (ID конфигурации «Вход через Facebook для бизнеса» в приложении Meta). До этого —
+            только ручное подключение номера, который уже работает через API.
           </p>
         )}
 
