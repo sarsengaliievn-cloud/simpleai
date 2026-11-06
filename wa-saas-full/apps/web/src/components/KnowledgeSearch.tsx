@@ -5,7 +5,7 @@ import { useState } from 'react';
 type Hit = { title: string; ordinal: number; score: number; preview: string };
 
 export function KnowledgeSearch() {
-  const [q, setQ] = useState('Есть ли доставка в Астану?');
+  const [q, setQ] = useState('');
   const [data, setData] = useState<{ hits: Hit[]; answer: string; confidence: number; threshold: number; needsHuman: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -36,7 +36,7 @@ export function KnowledgeSearch() {
       </p>
 
       <div className="row" style={{ marginBottom: 16 }}>
-        <input className="input" value={q} onChange={(e) => setQ(e.target.value)}
+        <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Вопрос как пишет клиент, например «Есть ли доставка в Астану?»"
                onKeyDown={(e) => e.key === 'Enter' && run()} />
         <button className="btn btn-primary" onClick={run} disabled={loading}>
           {loading ? '…' : 'Найти'}

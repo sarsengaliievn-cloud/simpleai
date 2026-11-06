@@ -73,7 +73,10 @@ export async function addManualNote(title: string, text: string) {
     } as never,
   });
 
-  await enqueue(company.id, doc.id, text);
+  // Владельцы пишут в название сам вопрос клиента («Саламатсыз ба! 38 900
+  // жеңілдікпен алғым келеді»), а в текст — ответ. Ищем по обоим.
+  const heading = title.trim();
+  await enqueue(company.id, doc.id, heading ? `${heading}\n\n${text}` : text);
 
   revalidatePath('/knowledge');
   return { ok: true as const };

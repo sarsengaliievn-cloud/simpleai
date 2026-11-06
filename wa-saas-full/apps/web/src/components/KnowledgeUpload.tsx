@@ -65,11 +65,12 @@ export function KnowledgeUpload() {
       ) : (
         <>
           <label className="field">
-            <span className="label">Название</span>
+            <span className="label">Название или вопрос клиента</span>
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Условия доставки" />
+            <span className="hint">Можно написать сам вопрос, как пишут клиенты: «Астанаға жеткізу бар ма?» — бот ищет и по нему, и по ответу.</span>
           </label>
           <label className="field">
-            <span className="label">Текст</span>
+            <span className="label">Ответ</span>
             <textarea className="textarea" style={{ minHeight: 150 }} value={text}
                       onChange={(e) => setText(e.target.value)}
                       placeholder="Доставка по Алматы — на следующий день, 1 500 ₸…" />

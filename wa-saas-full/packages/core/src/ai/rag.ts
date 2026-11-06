@@ -176,14 +176,17 @@ export async function answerQuestion(params: {
     : null;
 
   // ── 3. Готов купить — собрать заказ для менеджера ─────────
-  if (u?.intent === 'buy') {
-    const order = draftOrder(u, catalog, match, params.catalog ?? null);
-    return {
-      answer: '', confidence: 100, modelConfidence: 100, topScore: 0, needsHuman: false, hits: [],
-      usage: { inputTokens, outputTokens, embedTokens: 0 }, ai: choice,
-      understanding: u, catalog: catalogInfo, order,
-    };
-  }
+  // Всё известно (модель, размер, город) — сразу менеджеру. Не хватает —
+  // сначала база знаний: там может быть ответ владельца на это самое
+  // сообщение («хочу по акции за 38 900» → подарки и «какой размер?»).
+  // Базе нечего сказать — уточняем недостающее сами.
+  const order = u?.intent === 'buy' ? draftOrder(u, catalog, match, params.catalog ?? null) : null;
+  const orderResult = (spent = { input: 0, output: 0, embed: 0 }): AnswerResult => ({
+    answer: '', confidence: 100, modelConfidence: 100, topScore: 0, needsHuman: false, hits: [],
+    usage: { inputTokens: inputTokens + spent.input, outputTokens: outputTokens + spent.output, embedTokens: spent.embed }, ai: choice,
+    understanding: u, catalog: catalogInfo, order,
+  });
+  if (order && order.missing.length === 0) return orderResult();
 
   // ── 4. База знаний: ищем и по исходному тексту, и по переписанному ──
   const texts = query !== params.question ? [query, params.question] : [params.question];
@@ -204,6 +207,9 @@ export async function answerQuestion(params: {
   const stock = catalog && match && match.mode !== 'none' && params.catalog
     ? [catalogBlock(catalog, match, params.catalog), storesLine(catalog)].filter(Boolean).join('\n\n')
     : '';
+
+  // Хочет купить, а базе нечего сказать — уточняем модель, размер, город.
+  if (order && relevant.length === 0 && !stock) return orderResult({ input: 0, output: 0, embed: embedTokens });
 
   // Ни базы, ни склада — до модели даже не идём: дешевле и честнее.
   if (relevant.length === 0 && !stock) {
@@ -236,7 +242,12 @@ export async function answerQuestion(params: {
     system: buildSystemPrompt(params.config, params.company),
     messages: normalizeHistory([
       ...history,
-      { role: 'user', content: `${context}\n\n---\n\nВопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}` },
+      {
+        role: 'user',
+        content: `${context}\n\n---\n\nВопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}${
+          order ? `\n(Клиент хочет купить. Если в базе есть ответ на это — ответь по нему; в конце спроси, чего не хватает для заказа: ${order.missing.map((f) => ({ model: 'модель', size: 'размер', city: 'город или самовывоз' })[f]).join(', ')}.)` : ''
+        }`,
+      },
     ]),
   });
 
@@ -254,12 +265,16 @@ export async function answerQuestion(params: {
       })).filter((p) => p.url)
     : [];
 
+  const needsHuman = parsed.needsHuman || confidence < params.config.confidenceThreshold;
+  // База не помогла — для покупателя лучше уточнить заказ, чем звать менеджера.
+  if (order && (needsHuman || !parsed.answer)) return orderResult({ input: result.inputTokens, output: result.outputTokens, embed: embedTokens });
+
   return {
     answer: parsed.answer,
     confidence,
     modelConfidence: parsed.confidence,
     topScore,
-    needsHuman: parsed.needsHuman || confidence < params.config.confidenceThreshold,
+    needsHuman,
     hits,
     usage: { inputTokens: inputTokens + result.inputTokens, outputTokens: outputTokens + result.outputTokens, embedTokens },
     ai: choice,
