@@ -28,6 +28,7 @@ export async function startShiftAction() {
     const waiting = await ctx.db.deal.findMany({
       where: {
         assigneeId: null,
+        archivedAt: null,
         stage: { kind: { notIn: CLOSED_KINDS } },
         conversation: {
           lastMessageAt: { gte: new Date(now.getTime() - DAY) },

@@ -263,6 +263,10 @@ model Conversation {
   /// отправить нельзя — только утверждённый шаблон.
   windowExpiresAt DateTime?
   unreadCount   Int                @default(0)
+  /// Закрыт: когда, кем и с каким итогом (info, won, lost, spam, done).
+  closedAt      DateTime?
+  closeReason   String?
+  closedById    String?            @db.Uuid
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
@@ -581,6 +585,10 @@ model Deal {
   /// Напоминание менеджеру: когда и о чём.
   remindAt       DateTime?
   remindNote     String?
+  /// Не продажа: «просто вопрос» или спам. Сделка скрыта с доски и не
+  /// портит конверсию, но видна в истории клиента.
+  archivedAt     DateTime?
+  archiveReason  String?
   stageChangedAt DateTime  @default(now())
   /// Даты ключевых событий — по ним считается конверсия за период.
   assignedAt     DateTime?

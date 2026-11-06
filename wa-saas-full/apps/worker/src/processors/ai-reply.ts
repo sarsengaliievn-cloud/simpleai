@@ -266,7 +266,7 @@ async function handleOrder(
 
   // В сделку — что выбрал клиент; сумму и товар менеджер поправит при оформлении.
   const deal = await db.deal.findFirst({
-    where: { conversationId, stage: { kind: { notIn: ['WON', 'LOST'] } } },
+    where: { conversationId, archivedAt: null, stage: { kind: { notIn: ['WON', 'LOST'] } } },
     orderBy: { createdAt: 'desc' },
   });
   if (deal) {

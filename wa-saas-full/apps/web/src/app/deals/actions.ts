@@ -166,3 +166,13 @@ export async function startDealAction(conversationId: string): Promise<DealResul
   refresh();
   return { ok: true };
 }
+
+/** Сделку «просто вопрос» или «спам» вернуть на доску. */
+export async function restoreDealAction(dealId: string): Promise<DealResult> {
+  const { ctx, deal } = await ownDeal(dealId);
+  if (!deal) return { ok: false, error: 'Сделка не найдена' };
+  await ctx.db.deal.updateMany({ where: { id: dealId }, data: { archivedAt: null, archiveReason: null } });
+  await ctx.db.dealEvent.create({ data: { dealId, actorUserId: ctx.user.id, type: 'note', text: 'Сделка снова в работе' } as never });
+  refresh();
+  return { ok: true };
+}

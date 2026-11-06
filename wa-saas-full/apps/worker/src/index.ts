@@ -2,7 +2,7 @@
 import './env.js';
 
 import { Worker } from 'bullmq';
-import { QUEUES, type AiReplyJob, type InboundMessageJob, type IngestDocumentJob } from '@wa/core';
+import { QUEUES, autoCloseConversations, type AiReplyJob, type InboundMessageJob, type IngestDocumentJob } from '@wa/core';
 import { prisma } from '@wa/db';
 import { connection } from './redis.js';
 import { processInboundMessage } from './processors/inbound-message.js';
@@ -43,11 +43,23 @@ worker.on('failed', (job, err) => console.error(`[worker] fail ${job?.id}:`, err
 
 console.log('[worker] запущен, слушаю очереди', QUEUES.inboundMessage, QUEUES.ingestDocument, QUEUES.aiReply);
 
+// Автозакрытие диалогов: «просто вопрос» через сутки тишины после ответа бота,
+// закрытые сделки — через 3 дня. Раз в 15 минут, первый раз — через минуту после старта.
+const AUTO_CLOSE_EVERY_MS = Number(process.env.AUTO_CLOSE_EVERY_MS) || 15 * 60 * 1000;
+const runAutoClose = () =>
+  autoCloseConversations(prisma)
+    .then((n) => n && console.log(`[inbox] автоматически закрыто диалогов: ${n}`))
+    .catch((error) => console.error('[inbox] автозакрытие:', (error as Error).message));
+const autoCloseStart = setTimeout(runAutoClose, Math.min(60_000, AUTO_CLOSE_EVERY_MS));
+const autoCloseTimer = setInterval(runAutoClose, AUTO_CLOSE_EVERY_MS);
+
 let stopping = false;
 async function shutdown() {
   if (stopping) return;
   stopping = true;
   console.log('[worker] останавливаюсь');
+  clearTimeout(autoCloseStart);
+  clearInterval(autoCloseTimer);
   await worker.close();
   await ingestWorker.close();
   await replyWorker.close();

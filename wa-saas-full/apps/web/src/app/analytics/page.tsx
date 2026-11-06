@@ -33,7 +33,7 @@ export default async function AnalyticsPage({ searchParams }: Props) {
     },
     select: {
       createdAt: true, assignedAt: true, orderedAt: true, wonAt: true, lostAt: true,
-      amount: true, lostReason: true, assigneeId: true, source: true, adHeadline: true,
+      amount: true, lostReason: true, assigneeId: true, source: true, adHeadline: true, archiveReason: true,
       assignee: { select: { firstName: true, lastName: true } },
     },
   });
@@ -87,7 +87,7 @@ export default async function AnalyticsPage({ searchParams }: Props) {
   const openDeals = seesOnlyOwn
     ? []
     : await db.deal.findMany({
-        where: { assigneeId: { not: null }, stage: { kind: { notIn: ['WON', 'LOST'] } } },
+        where: { assigneeId: { not: null }, archivedAt: null, stage: { kind: { notIn: ['WON', 'LOST'] } } },
         select: {
           assigneeId: true, stageChangedAt: true, remindAt: true,
           stage: { select: { kind: true } },
@@ -171,7 +171,7 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           <div className="kpi">
             <div className="kpi-l">Обращений</div>
             <div className="kpi-v">{f.created}</div>
-            <div className="kpi-d muted">новых сделок за период</div>
+            <div className="kpi-d muted">{f.questions || f.spam ? `ещё ${f.questions} просто вопросов${f.spam ? `, ${f.spam} спам` : ''} — не в счёт` : 'новых сделок за период'}</div>
           </div>
           <div className="kpi">
             <div className="kpi-l">Заказов</div>

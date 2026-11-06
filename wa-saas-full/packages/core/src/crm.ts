@@ -79,7 +79,7 @@ export async function ensureOpenDeal(
   input: { customerId: string; conversationId: string | null; at?: Date },
 ) {
   const open = await db.deal.findFirst({
-    where: { customerId: input.customerId, stage: { kind: { notIn: CLOSED_KINDS } } },
+    where: { customerId: input.customerId, archivedAt: null, stage: { kind: { notIn: CLOSED_KINDS } } },
     orderBy: { createdAt: 'desc' },
   });
   if (open) {
@@ -370,7 +370,7 @@ export async function autoAssignConversation(
   if (!company?.autoAssign) return null;
 
   const deal = await db.deal.findFirst({
-    where: { conversationId: input.conversationId, stage: { kind: { notIn: CLOSED_KINDS } } },
+    where: { conversationId: input.conversationId, archivedAt: null, stage: { kind: { notIn: CLOSED_KINDS } } },
     orderBy: { createdAt: 'desc' },
   });
   if (!deal || deal.assigneeId) return null;
@@ -432,6 +432,8 @@ export type FunnelDeal = {
   amount: number | null;
   lostReason: string | null;
   assigneeId: string | null;
+  /** info — просто вопрос, spam — спам: в конверсию не идут. */
+  archiveReason?: string | null;
 };
 
 /**
@@ -441,7 +443,10 @@ export type FunnelDeal = {
  */
 export function funnel(deals: FunnelDeal[], from: Date, to: Date) {
   const inRange = (d: Date | null) => !!d && d >= from && d < to;
-  const created = deals.filter((d) => inRange(d.createdAt)).length;
+  // «Просто вопрос» и спам — не продажи: в обращения для конверсии не идут.
+  const questions = deals.filter((d) => inRange(d.createdAt) && d.archiveReason === 'info').length;
+  const spam = deals.filter((d) => inRange(d.createdAt) && d.archiveReason === 'spam').length;
+  const created = deals.filter((d) => inRange(d.createdAt) && !d.archiveReason).length;
   const assigned = deals.filter((d) => inRange(d.assignedAt)).length;
   const orderedDeals = deals.filter((d) => inRange(d.orderedAt));
   const ordered = orderedDeals.length;
@@ -454,6 +459,8 @@ export function funnel(deals: FunnelDeal[], from: Date, to: Date) {
 
   return {
     created,
+    questions,
+    spam,
     assigned,
     ordered,
     won,

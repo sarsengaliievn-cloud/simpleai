@@ -1,5 +1,6 @@
+import Link from 'next/link';
 import { can, lostReasonsOf } from '@wa/core';
-import { isWindowOpen } from '@wa/core';
+import { loadThread } from '@/lib/thread';
 import { requireCompany } from '@/lib/session';
 import { Shell } from '@/components/Shell';
 import { ConversationList } from '@/components/ConversationList';
@@ -14,19 +15,22 @@ const ATTACH_PREVIEW: Record<string, string> = {
   IMAGE: '📷 Фото', VIDEO: '🎥 Видео', DOCUMENT: '📄 Файл', AUDIO: '🎤 Голосовое', LOCATION: '📍 Геолокация', UNSUPPORTED: 'Стикер или реакция',
 };
 
-type Props = { searchParams: Promise<{ id?: string; filter?: string; q?: string }> };
+type Props = { searchParams: Promise<{ id?: string; filter?: string; q?: string; deal?: string }> };
 
 export default async function ConversationsPage({ searchParams }: Props) {
-  const { id, filter = 'all', q = '' } = await searchParams;
+  const { id, filter: rawFilter = 'open', q = '', deal: showDeal } = await searchParams;
   const ctx = await requireCompany();
-  const { db, ownConversations, seesOnlyOwn } = ctx;
+  const { db, ownConversations, seesOnlyOwn, user } = ctx;
+  // Старые ссылки «Все» ведут в открытые: закрытые копились и мешали.
+  const filter = ['open', 'new', 'mine', 'unread', 'closed'].includes(rawFilter) ? rawFilter : 'open';
 
+  const notClosed = { status: { not: 'CLOSED' as const } };
   const base =
-    filter === 'unread' ? { unreadCount: { gt: 0 } }
-    : filter === 'human' ? { mode: 'HUMAN' as const }
-    : filter === 'new' ? { deals: { some: { stage: { kind: 'NEW' as const } } }, mode: 'HUMAN' as const, assigneeId: null }
+    filter === 'unread' ? { ...notClosed, unreadCount: { gt: 0 } }
+    : filter === 'new' ? { ...notClosed, deals: { some: { archivedAt: null, stage: { kind: 'NEW' as const } } }, mode: 'HUMAN' as const, assigneeId: null }
+    : filter === 'mine' ? { ...notClosed, OR: [{ assigneeId: user.id }, { deals: { some: { assigneeId: user.id, archivedAt: null } } }] }
     : filter === 'closed' ? { status: 'CLOSED' as const }
-    : {};
+    : notClosed;
 
   // Поиск по имени и номеру: в номере игнорируем пробелы, плюсы и скобки.
   const query = q.trim().slice(0, 60);
@@ -64,22 +68,14 @@ export default async function ConversationsPage({ searchParams }: Props) {
   const validId = id && /^[0-9a-f-]{36}$/i.test(id) ? id : undefined;
   const activeId = validId ?? conversations[0]?.id ?? null;
 
-  const active = activeId
-    ? await db.conversation.findFirst({
-        where: { id: activeId, ...ownConversations },
-        include: {
-          customer: true,
-          messages: { orderBy: { createdAt: 'asc' }, take: 200 },
-        },
-      })
-    : null;
+  const active = activeId ? await loadThread(db, { id: activeId, ...ownConversations }) : null;
 
   const quickReplies = active ? await db.quickReply.findMany({ orderBy: { position: 'asc' }, select: { id: true, title: true, text: true } }) : [];
 
   const [stages, deal, members] = active
     ? await Promise.all([
         loadStages(db),
-        loadDeal(db, { customerId: active.customer.id }),
+        loadDeal(db, { customerId: active.customerId }),
         can(ctx.role, 'team:manage') ? loadMembers(db) : Promise.resolve(null),
       ])
     : [[], null, null];
@@ -113,31 +109,13 @@ export default async function ConversationsPage({ searchParams }: Props) {
 
         {active ? (
           <ThreadView
+            key={active.conversation.id}
             quickReplies={quickReplies}
             backHref={`/conversations?${new URLSearchParams({ filter, ...(query ? { q: query } : {}) })}`}
-            conversation={{
-              id: active.id,
-              mode: active.mode,
-              windowOpen: isWindowOpen(active.windowExpiresAt),
-              windowExpiresAt: active.windowExpiresAt,
-              customerName: active.customer.name || `+${active.customer.waId}`,
-              customerPhone: active.customer.phone,
-              customerCity: active.customer.city,
-            }}
-            messages={active.messages.map((m) => ({
-              id: m.id,
-              direction: m.direction,
-              authorType: m.authorType,
-              text: m.text,
-              type: m.type,
-              status: m.status,
-              errorCode: m.errorCode,
-              createdAt: m.createdAt,
-              fromPhone: (m.metadata as { source?: string } | null)?.source === 'phone',
-              media: (m.metadata as { mediaId?: string } | null)?.mediaId
-                ? { fileName: (m.metadata as { fileName?: string }).fileName ?? null, mime: m.mediaMimeType }
-                : null,
-            }))}
+            dealHref={`/conversations?${new URLSearchParams({ filter, ...(query ? { q: query } : {}), id: active.conversation.id, deal: '1' })}`}
+            lostReasons={lostReasonsOf(ctx.company)}
+            conversation={active.conversation}
+            messages={active.messages}
           />
         ) : (
           <div className="empty" style={{ alignSelf: 'center' }}>
@@ -150,12 +128,19 @@ export default async function ConversationsPage({ searchParams }: Props) {
           </div>
         )}
 
+        {active && showDeal && (
+          <Link
+            href={`/conversations?${new URLSearchParams({ filter, ...(query ? { q: query } : {}), id: active.conversation.id })}`}
+            className="ctx-scrim"
+            aria-label="Скрыть сделку"
+          />
+        )}
         {active && (
-          <aside className="ctx">
+          <aside className={`ctx ${showDeal ? 'ctx-open' : ''}`}>
             {deal ? (
               <DealPanel key={deal.id} deal={deal} stages={stages} members={members} lostReasons={lostReasonsOf(ctx.company)} />
             ) : (
-              <StartDeal conversationId={active.id} />
+              <StartDeal conversationId={active.conversation.id} />
             )}
           </aside>
         )}

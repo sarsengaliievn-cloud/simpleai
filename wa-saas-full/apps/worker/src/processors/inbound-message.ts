@@ -1,6 +1,6 @@
 import { prisma, forCompany } from '@wa/db';
 import { getProvider, type InboundMessage, type StatusUpdate, type EchoMessage } from '@wa/whatsapp';
-import { windowExpiryFrom, ensureOpenDeal, recordAdSource, autoAssignConversation, warmCatalog, type InboundMessageJob } from '@wa/core';
+import { windowExpiryFrom, ensureOpenDeal, recordAdSource, autoAssignConversation, warmCatalog, reopenConversation, type InboundMessageJob } from '@wa/core';
 import { scheduleAiReply } from '../queues.js';
 
 /**
@@ -165,10 +165,15 @@ async function handleOne(inbound: InboundMessage): Promise<string | null> {
     await db.customer.updateMany({ where: { id: customer.id }, data: { name: inbound.profileName } });
   }
 
+  // Клиент написал в закрытый диалог — открываем его же: история одна, как в WhatsApp.
   let conversation = await db.conversation.findFirst({
-    where: { customerId: customer.id, status: { not: 'CLOSED' } },
+    where: { customerId: customer.id },
     orderBy: { lastMessageAt: 'desc' },
   });
+  if (conversation?.status === 'CLOSED') {
+    await reopenConversation(db, conversation.id, { byCustomer: true });
+    conversation = { ...conversation, status: 'OPEN' };
+  }
   if (!conversation) {
     conversation = await db.conversation.create({
       data: { customerId: customer.id, phoneNumberId: number.id } as never,
@@ -275,9 +280,14 @@ async function handleEcho(echo: EchoMessage): Promise<string | null> {
   if (!customer) throw new Error(`Не удалось создать клиента ${echo.to}`);
 
   let conversation = await db.conversation.findFirst({
-    where: { customerId: customer.id, status: { not: 'CLOSED' } },
+    where: { customerId: customer.id },
     orderBy: { lastMessageAt: 'desc' },
   });
+  // Менеджер написал с телефона в закрытый диалог — значит, работа идёт снова.
+  if (conversation?.status === 'CLOSED') {
+    await reopenConversation(db, conversation.id, { byCustomer: true });
+    conversation = { ...conversation, status: 'OPEN' };
+  }
   if (!conversation) {
     conversation = await db.conversation.create({
       data: { customerId: customer.id, phoneNumberId: number.id, mode: 'HUMAN' } as never,

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireCompany } from '@/lib/session';
-import { assertCanSendFreeText, sendWhatsAppText, markWhatsAppRead, sendErrorText } from '@wa/core';
+import { assertCanSendFreeText, sendWhatsAppText, markWhatsAppRead, sendErrorText, closeConversation, reopenConversation, parseAmount, CrmError, CLOSE_OUTCOMES, type CloseOutcome } from '@wa/core';
 
 /**
  * Переключение режима диалога. Системное сообщение пишется только если
@@ -38,6 +38,7 @@ async function switchMode(conversationId: string, mode: 'AI' | 'HUMAN', note: st
   });
 
   revalidatePath('/conversations');
+  revalidatePath('/deals');
 }
 
 /** Менеджер забирает диалог: ассистент перестаёт отвечать автоматически. */
@@ -111,6 +112,7 @@ export async function sendMessage(conversationId: string, text: string) {
   });
 
   revalidatePath('/conversations');
+  revalidatePath('/deals');
   return { ok: true as const };
 }
 
@@ -143,4 +145,49 @@ export async function markRead(conversationId: string) {
   }
 
   revalidatePath('/conversations');
+  revalidatePath('/deals');
+}
+
+export type CloseResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Закрыть диалог с итогом: просто вопрос, купил, отказ, спам. Закрыть может
+ * любой, кто видит диалог: менеджер — свои, владелец — все.
+ */
+export async function closeConversationAction(
+  conversationId: string,
+  outcome: CloseOutcome,
+  extra: { lostReason?: string; amount?: string; product?: string } = {},
+): Promise<CloseResult> {
+  const { db, user, ownConversations } = await requireCompany();
+  if (!CLOSE_OUTCOMES.includes(outcome)) return { ok: false, error: 'Неизвестный итог' };
+  const visible = await db.conversation.findFirst({ where: { id: conversationId, ...ownConversations }, select: { id: true } });
+  if (!visible) return { ok: false, error: 'Диалог не найден' };
+  try {
+    await closeConversation(db, {
+      conversationId,
+      outcome,
+      actorUserId: user.id,
+      actorName: `${user.firstName} ${user.lastName}`.trim(),
+      lostReason: extra.lostReason?.trim().slice(0, 120) || null,
+      amount: extra.amount ? parseAmount(extra.amount) : null,
+      product: extra.product?.trim().slice(0, 300) || null,
+    });
+  } catch (error) {
+    return { ok: false, error: error instanceof CrmError ? error.message : 'Не удалось закрыть диалог' };
+  }
+  revalidatePath('/conversations');
+  revalidatePath('/deals');
+  return { ok: true };
+}
+
+/** Открыть закрытый диалог снова. */
+export async function reopenConversationAction(conversationId: string): Promise<CloseResult> {
+  const { db, user, ownConversations } = await requireCompany();
+  const visible = await db.conversation.findFirst({ where: { id: conversationId, ...ownConversations }, select: { id: true } });
+  if (!visible) return { ok: false, error: 'Диалог не найден' };
+  await reopenConversation(db, conversationId, { actorName: `${user.firstName} ${user.lastName}`.trim() });
+  revalidatePath('/conversations');
+  revalidatePath('/deals');
+  return { ok: true };
 }

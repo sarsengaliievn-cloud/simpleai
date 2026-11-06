@@ -26,7 +26,7 @@ export default async function TeamPage() {
   // Открытые сделки у каждого — чтобы перед удалением было видно, кого передать.
   const open = await db.deal.groupBy({
     by: ['assigneeId'],
-    where: { assigneeId: { not: null }, stage: { kind: { notIn: ['WON', 'LOST'] } } },
+    where: { assigneeId: { not: null }, archivedAt: null, stage: { kind: { notIn: ['WON', 'LOST'] } } },
     _count: { _all: true },
   });
   const openBy = new Map(open.map((o) => [o.assigneeId, o._count._all]));

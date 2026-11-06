@@ -8,6 +8,7 @@ import {
   updateDealAction,
   addDealNoteAction,
   setReminderAction,
+  restoreDealAction,
   type DealResult,
 } from '@/app/deals/actions';
 import type { DealView, MemberView, StageView } from '@/lib/crm';
@@ -90,8 +91,15 @@ export function DealPanel({
 
       {error && <div className="notice notice-bad">{error}</div>}
 
+      {deal.archiveReason && (
+        <div className="notice spread" style={{ alignItems: 'center', gap: 8 }}>
+          <span className="small">Не продажа: {deal.archiveReason === 'spam' ? 'спам' : 'просто вопрос'} — на доске не показывается.</span>
+          <button className="btn btn-ghost btn-sm" disabled={pending} onClick={() => run(() => restoreDealAction(deal.id))}>Вернуть в работу</button>
+        </div>
+      )}
+
       {/* Главные действия — то, ради чего менеджер открыл карточку. */}
-      {mode.kind === 'idle' && current?.kind !== 'WON' && current?.kind !== 'LOST' && (
+      {!deal.archiveReason && mode.kind === 'idle' && current?.kind !== 'WON' && current?.kind !== 'LOST' && (
         <div className="deal-actions">
           {/* Заказ уже оформлен (или этапа «Заказ» нет) — следующий шаг: «Купил». */}
           {(current?.kind === 'ORDER' || !orderStage) && wonStage ? (

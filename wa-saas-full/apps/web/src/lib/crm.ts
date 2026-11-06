@@ -17,6 +17,8 @@ export type DealView = {
   stageChangedAt: Date;
   remindAt: Date | null;
   remindNote: string | null;
+  /** Не продажа: info — просто вопрос, spam — спам. */
+  archiveReason: string | null;
   /** Откуда пришёл: «WhatsApp напрямую» или заголовок рекламы. */
   source: string;
   adUrl: string | null;
@@ -72,6 +74,7 @@ export async function loadDeal(db: TenantClient, where: Record<string, unknown>)
     stageChangedAt: deal.stageChangedAt,
     remindAt: deal.remindAt,
     remindNote: deal.remindNote,
+    archiveReason: deal.archivedAt ? deal.archiveReason ?? 'info' : null,
     source: sourceLabel(deal),
     adUrl: deal.adSourceUrl,
     purchases: purchases.map((p) => ({ id: p.id, amount: p.amount, product: p.product, at: p.wonAt! })),

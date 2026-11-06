@@ -7,6 +7,9 @@ import { DealPanel } from '@/components/crm/DealPanel';
 import { StageEditor } from '@/components/crm/StageEditor';
 import { DealFilters } from '@/components/crm/DealFilters';
 import { loadDeal, loadMembers, loadStages, purchaseCounts } from '@/lib/crm';
+import { loadThread } from '@/lib/thread';
+import { ThreadView } from '@/components/ThreadView';
+import { AutoRefresh } from '@/components/AutoRefresh';
 import { money } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -14,10 +17,10 @@ export const dynamic = 'force-dynamic';
 /** Закрытые сделки (выдан, отказ) на доске — только свежие, иначе колонки распухают. */
 const CLOSED_DAYS = 30;
 
-type Props = { searchParams: Promise<{ id?: string; m?: string; q?: string; f?: string; stages?: string }> };
+type Props = { searchParams: Promise<{ id?: string; m?: string; q?: string; f?: string; stages?: string; tab?: string }> };
 
 export default async function DealsPage({ searchParams }: Props) {
-  const { id, m = '', q = '', f: rawFilter = '', stages: editStages } = await searchParams;
+  const { id, m = '', q = '', f: rawFilter = '', stages: editStages, tab } = await searchParams;
   const filter = rawFilter === 'stale' || rawFilter === 'remind' ? rawFilter : '';
   const ctx = await requireCompany();
   const { db, ownDeals, seesOnlyOwn, role, company } = ctx;
@@ -34,6 +37,8 @@ export default async function DealsPage({ searchParams }: Props) {
   const deals = await db.deal.findMany({
     where: {
       ...ownDeals,
+      // «Просто вопрос» и спам — не продажи, доску не засоряют.
+      archivedAt: null,
       ...(m === 'none' ? { assigneeId: null } : m && !seesOnlyOwn ? { assigneeId: m } : {}),
       OR: [
         { stage: { kind: { notIn: ['WON', 'LOST'] } } },
@@ -116,6 +121,9 @@ export default async function DealsPage({ searchParams }: Props) {
     .reduce((sum, d) => sum + (d.amount ?? 0), 0);
 
   const selected = id && /^[0-9a-f-]{36}$/i.test(id) ? await loadDeal(db, { id, ...ownDeals }) : null;
+  // Переписка прямо в карточке: сотрудники не уходят в «Диалоги» и не теряются.
+  const thread = selected?.conversationId ? await loadThread(db, { id: selected.conversationId }) : null;
+  const quickReplies = thread ? await db.quickReply.findMany({ orderBy: { position: 'asc' }, select: { id: true, title: true, text: true } }) : [];
   const params = (extra: Record<string, string>) => {
     const sp = new URLSearchParams({ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...(filter ? { f: filter } : {}), ...extra });
     return `/deals${sp.size ? `?${sp}` : ''}`;
@@ -141,7 +149,7 @@ export default async function DealsPage({ searchParams }: Props) {
         </>
       }
     >
-      <div className="page deals-page">
+      <div className={`page deals-page ${editStages && canEditStages ? '' : 'deals-fit'}`}>
         {editStages && canEditStages && (
           <StageEditor
             key={stages.map((s) => s.id + s.name + s.kind).join('|')}
@@ -176,11 +184,35 @@ export default async function DealsPage({ searchParams }: Props) {
       {selected && (
         <>
           <Link href={params({})} className="drawer-scrim" aria-label="Закрыть карточку" />
-          <aside className="drawer" aria-label={`Сделка: ${selected.customer.name}`}>
+          <aside className={`drawer ${thread ? 'drawer-wide' : ''} ${tab === 'deal' ? 'tab-deal' : 'tab-chat'}`} aria-label={`Сделка: ${selected.customer.name}`}>
             <div className="drawer-close">
+              {thread && (
+                <div className="seg drawer-tabs" role="tablist">
+                  <Link href={params({ id: selected.id })} className={tab === 'deal' ? '' : 'on'} role="tab">Переписка</Link>
+                  <Link href={params({ id: selected.id, tab: 'deal' })} className={tab === 'deal' ? 'on' : ''} role="tab">Сделка</Link>
+                </div>
+              )}
+              <span style={{ flex: 1 }} />
               <Link href={params({})} className="btn btn-quiet btn-sm">Закрыть</Link>
             </div>
-            <DealPanel key={selected.id} deal={selected} stages={stages} members={members} lostReasons={lostReasons} showDialogLink />
+            <div className="drawer-body">
+              {thread && (
+                <div className="drawer-chat">
+                  <ThreadView
+                    key={thread.conversation.id}
+                    conversation={thread.conversation}
+                    messages={thread.messages}
+                    quickReplies={quickReplies}
+                    lostReasons={lostReasons}
+                    backHref={params({})}
+                  />
+                  <AutoRefresh active intervalMs={8000} />
+                </div>
+              )}
+              <div className="drawer-deal">
+                <DealPanel key={selected.id} deal={selected} stages={stages} members={members} lostReasons={lostReasons} />
+              </div>
+            </div>
           </aside>
         </>
       )}

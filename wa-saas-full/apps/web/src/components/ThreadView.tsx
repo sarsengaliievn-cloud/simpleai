@@ -4,6 +4,7 @@ import { useState, useTransition, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { sendMessage, takeOver, returnToAi, markRead } from '@/app/conversations/actions';
 import { initials, avatarColor, clockWithDay } from '@/lib/format';
+import { CloseChat } from './CloseChat';
 
 type Message = {
   id: string;
@@ -61,6 +62,8 @@ type Conversation = {
   customerName: string;
   customerPhone: string;
   customerCity: string | null;
+  /** Итог, если диалог закрыт: info, won, lost, spam, done. */
+  closedReason?: string | null;
 };
 
 const AUTHOR: Record<string, string> = { AI: 'Ассистент', MANAGER: 'Менеджер' };
@@ -75,12 +78,17 @@ export function ThreadView({
   messages,
   quickReplies = [],
   backHref = '/conversations',
+  lostReasons = [],
+  dealHref,
 }: {
   conversation: Conversation;
   messages: Message[];
   quickReplies?: QuickReply[];
   /** На телефоне — «назад» к списку диалогов. */
   backHref?: string;
+  lostReasons?: string[];
+  /** На узком экране сделка прячется — кнопка «Сделка» открывает её поверх. */
+  dealHref?: string;
 }) {
   const [text, setText] = useState('');
   const [quickOpen, setQuickOpen] = useState(false);
@@ -133,7 +141,7 @@ export function ThreadView({
       if (!result.ok) {
         setError(result.error);
         setText(body);
-      }
+      } else router.refresh();
     });
   };
 
@@ -170,17 +178,19 @@ export function ThreadView({
           <div>
             <div style={{ fontWeight: 700, fontSize: 14.5 }}>{conversation.customerName}</div>
             <div className="tiny muted">
-              {conversation.customerPhone}
+              <a href={`tel:${conversation.customerPhone}`} className="thread-phone">{conversation.customerPhone}</a>
               {conversation.customerCity ? ` · ${conversation.customerCity}` : ''}
             </div>
           </div>
         </div>
-        <div className="row">
-          {conversation.mode === 'AI' ? (
+        <div className="row thread-actions">
+          {dealHref && <a href={dealHref} className="btn btn-ghost btn-sm deal-toggle">Сделка</a>}
+          <CloseChat conversationId={conversation.id} closedReason={conversation.closedReason} lostReasons={lostReasons} />
+          {conversation.closedReason ? null : conversation.mode === 'AI' ? (
             <button
               className="btn btn-ghost btn-sm"
               disabled={pending}
-              onClick={() => start(() => takeOver(conversation.id))}
+              onClick={() => start(async () => { await takeOver(conversation.id); router.refresh(); })}
             >
               Забрать диалог
             </button>
@@ -188,7 +198,7 @@ export function ThreadView({
             <button
               className="btn btn-ghost btn-sm"
               disabled={pending}
-              onClick={() => start(() => returnToAi(conversation.id))}
+              onClick={() => start(async () => { await returnToAi(conversation.id); router.refresh(); })}
             >
               Вернуть ассистенту
             </button>
@@ -255,12 +265,12 @@ export function ThreadView({
           )}
           <input ref={fileInput} type="file" hidden accept="image/jpeg,image/png,video/mp4,video/3gpp,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
                  onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError(null); }} />
-          <button type="button" className="btn btn-ghost" title="Фото, видео или файл" aria-label="Прикрепить файл"
+          <button type="button" className="btn btn-ghost compose-icon" title="Фото, видео или файл" aria-label="Прикрепить файл"
                   disabled={!conversation.windowOpen || pending} onClick={() => fileInput.current?.click()}>
             📎
           </button>
           {quickReplies.length > 0 && (
-            <button type="button" className="btn btn-ghost" title="Быстрые ответы" aria-label="Быстрые ответы"
+            <button type="button" className="btn btn-ghost compose-icon" title="Быстрые ответы" aria-label="Быстрые ответы"
                     disabled={!conversation.windowOpen || pending} onClick={() => setQuickOpen((v) => !v)}>
               ⚡
             </button>

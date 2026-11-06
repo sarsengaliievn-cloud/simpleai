@@ -22,10 +22,10 @@ type Item = {
 };
 
 const FILTERS: Array<[string, string]> = [
-  ['all', 'Все'],
+  ['open', 'Открытые'],
   ['new', 'Ждут менеджера'],
+  ['mine', 'Мои'],
   ['unread', 'Непрочитанные'],
-  ['human', 'У людей'],
   ['closed', 'Закрытые'],
 ];
 

@@ -423,10 +423,12 @@ th.num{text-align:right}
   .kpis-5{grid-template-columns:repeat(3,1fr)}
 }
 @media(max-width:1080px){
-  .inbox{grid-template-columns:260px minmax(0,1fr);height:auto;min-height:calc(100vh - 68px)}
-  .inbox-list{grid-row:span 2}
-  .thread{min-height:70vh}
-  .ctx{border-left:none;border-top:1px solid var(--line)}
+  /* Сделка не помещается третьей колонкой — открывается поверх кнопкой «Сделка».
+     Переписка остаётся во всю высоту: шапка с номером клиента всегда на виду. */
+  .inbox{grid-template-columns:260px minmax(0,1fr)}
+  .ctx{display:none}
+  .ctx.ctx-open{display:block;position:fixed;top:0;right:0;bottom:0;width:min(380px,92vw);z-index:75;box-shadow:var(--sh-lg);border-left:1px solid var(--line)}
+  .ctx-scrim{position:fixed;inset:0;background:rgba(18,22,28,.28);z-index:70}
   .an-grid{grid-template-columns:1fr}
 }
 @media(max-width:1180px){
@@ -447,14 +449,13 @@ th.num{text-align:right}
   .feat-grid,.price-grid,.kpis,.split{grid-template-columns:1fr}
   .split{height:auto}
   .split-l{border-right:none;border-bottom:1px solid var(--line)}
-  .inbox{grid-template-columns:1fr;height:auto}
-  .inbox-list{border-right:none;border-bottom:1px solid var(--line)}
+  .inbox{grid-template-columns:1fr}
+  .inbox-list{border-right:none}
   /* Как в WhatsApp: сначала список, нажал — открылся чат со стрелкой «назад». */
   .inbox.no-open .thread,.inbox.no-open .ctx{display:none}
   .inbox.has-open .inbox-list{display:none}
   .thread-back{display:grid;place-items:center;width:34px;height:34px;margin-right:4px;border-radius:var(--r-sm);font-size:20px;color:var(--ink);text-decoration:none;flex:none}
   .thread-back:hover{background:var(--surface-2)}
-  .thread-b{min-height:52vh}
   .page{padding:18px 16px}
   .sec{padding:56px 0}
   .hero{padding:52px 0 44px}
@@ -603,3 +604,56 @@ video.msg-media{max-height:360px}
   .stage-edit-list li .stage-tools .btn{padding-left:6px;padding-right:6px}
 }
 .order-note{align-self:center;max-width:min(520px,100%);margin:6px 0;padding:10px 14px;border-radius:var(--r-sm);background:var(--amber-soft);color:var(--ink);font-size:13px;line-height:1.5;white-space:pre-line;overflow-wrap:anywhere;border:1px solid rgba(180,105,14,.22)}
+
+/* ── Экран без прокрутки страницы: «Диалоги» и доска «Сделки» ──
+   Страница не листается целиком: в переписке шапка с номером клиента и поле
+   ввода всегда на виду, на доске ползунок вбок всегда внизу экрана, а
+   колонки листаются каждая внутри себя. */
+/* :has() нельзя вкладывать в :has() — поэтому доска без редактора этапов помечена классом deals-fit. */
+.main:has(.inbox),.main:has(.deals-fit){height:100vh;height:100dvh}
+.main:has(.inbox) .inbox{flex:1;height:auto;min-height:0}
+.main:has(.deals-fit) .deals-fit{flex:1;min-height:0;overflow:hidden}
+.deals-fit .kanban{flex:1;min-height:0;align-items:stretch;padding-bottom:8px}
+.deals-fit .kan-col{display:flex;flex-direction:column;min-height:0;max-height:100%}
+.deals-fit .kan-list{flex:1;min-height:0;overflow-y:auto;margin-right:-6px;padding-right:6px}
+.deal-toggle{display:none}
+@media(max-width:1080px){.deal-toggle{display:inline-flex}}
+.thread-actions{flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.thread-phone{color:inherit;text-decoration:none}
+.thread-phone:hover{text-decoration:underline}
+
+/* Закрыть диалог: меню итогов */
+.close-chat{position:relative}
+.close-menu{position:absolute;right:0;top:calc(100% + 6px);width:min(320px,86vw);background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--sh-lg);padding:8px;z-index:30;display:flex;flex-direction:column;gap:2px}
+.close-menu>button{display:grid;gap:1px;text-align:left;padding:8px 10px;border-radius:var(--r-sm);background:none;border:0;cursor:pointer;font-family:inherit;font-size:13.5px;color:var(--ink)}
+.close-menu>button:hover{background:var(--surface-2)}
+.close-menu>button span{font-size:12px;color:var(--muted)}
+.close-menu .stage-form{padding:6px}
+
+/* Карточка сделки с перепиской: слева чат, справа сделка */
+.drawer-wide{width:min(1120px,100vw);padding:0;display:flex;flex-direction:column;overflow:hidden}
+.drawer-wide .drawer-close{padding:10px 14px;margin:0;border-bottom:1px solid var(--line);align-items:center;gap:8px}
+.drawer-tabs{display:none}
+.drawer-wide .drawer-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 380px}
+.drawer-wide .drawer-chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+.drawer-wide .drawer-chat .thread{flex:1;min-height:0}
+.drawer-wide .drawer-deal{overflow-y:auto;padding:16px 18px 28px}
+@media(max-width:1100px){
+  .drawer-wide .drawer-body{grid-template-columns:1fr}
+  .drawer-tabs{display:inline-flex}
+  .drawer-wide.tab-chat .drawer-deal,.drawer-wide.tab-deal .drawer-chat{display:none}
+  .drawer-wide .drawer-chat{border-right:none}
+}
+
+/* Телефон: шапка переписки в две строки, поле ввода шире */
+@media(max-width:860px){
+  .thread-h{flex-wrap:wrap;gap:8px;padding:10px 12px}
+  .thread-h>.row:first-child{min-width:0;flex:1 1 100%}
+  .thread-actions{flex:1 1 100%;justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .thread-actions .btn{flex:none}
+  .thread-f{padding:10px 12px}
+  .thread-f .row{gap:6px}
+  .compose-icon{width:40px;padding:0;flex:none}
+  .reply-box{flex:1;min-width:0}
+  .close-menu{position:fixed;left:12px;right:12px;top:112px;width:auto}
+}
