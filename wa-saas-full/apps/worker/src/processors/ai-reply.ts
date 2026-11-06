@@ -21,6 +21,7 @@ import {
   autoAssignConversation,
   orderQuestion,
   orderConfirmation,
+  partnerReply,
   sendWhatsAppMedia,
   assertPublicUrl,
   type AnswerResult,
@@ -158,6 +159,23 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     model: result.ai.model,
     ...result.usage,
   }, conversationId);
+
+  // ── Пишет не покупатель ────────────────────
+  // Маркетплейс, реклама, поставщик: короткое «передам руководству», сделку
+  // убираем с доски продаж, диалог — людям.
+  if (result.partner) {
+    const outcome = await sendAsAssistant(db, conversationId, partnerReply(result.partner.lang), { partner: true });
+    if (outcome === 'sent' && last.providerMessageId && conversation.phoneNumber) {
+      await markWhatsAppRead(db, { phoneNumberRowId: conversation.phoneNumber.id, providerMessageId: last.providerMessageId });
+    }
+    await db.deal.updateMany({
+      where: { conversationId, archivedAt: null, stage: { kind: 'NEW' }, assigneeId: null },
+      data: { archivedAt: new Date(), archiveReason: 'b2b' },
+    });
+    await handOff(db, conversationId, 'Пишет не покупатель: предложение о сотрудничестве, рекламе или услугах — бот не стал рассказывать про товары, диалог передан людям.', { partner: true });
+    console.log(`[ai] ${conversationId}: не покупатель — передано людям`);
+    return;
+  }
 
   // ── Клиент готов купить ────────────────────
   if (result.order) {

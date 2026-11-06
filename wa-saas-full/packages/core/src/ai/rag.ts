@@ -29,6 +29,8 @@ export type AnswerResult = {
   order?: OrderDraft | null;
   /** Фото подобранных моделей — бот отправит их после ответа. */
   photos?: Array<{ url: string; caption: string }>;
+  /** Пишет не покупатель (сотрудничество, реклама, вакансия) — про товары не отвечаем. */
+  partner?: { lang: 'ru' | 'kk' } | null;
 };
 
 export type OrderField = 'model' | 'size' | 'city';
@@ -134,6 +136,16 @@ export async function answerQuestion(params: {
   }
   const query = u?.query && u.query !== params.question ? u.query : params.question;
 
+  // Не покупатель: маркетплейс, реклама, поставщик, вакансия. Рассказывать
+  // ему цены и оплату бессмысленно — вежливо отвечаем и отдаём людям.
+  if (u?.intent === 'partner') {
+    return {
+      answer: '', confidence: 100, modelConfidence: 100, topScore: 0, needsHuman: false, hits: [],
+      usage: { inputTokens, outputTokens, embedTokens: 0 }, ai: choice,
+      understanding: u, partner: { lang: u.lang },
+    };
+  }
+
   // ── 2. Склад ───────────────────────────────────────────────
   let catalog: Catalog | null = null;
   let match: CatalogMatch | null = null;
@@ -142,14 +154,14 @@ export async function answerQuestion(params: {
   // или просто прислал карточку модели с сайта (ссылка, артикул).
   const linksModel = /#p=|артикул|\bарт\.?\s*[\w-]{2,}/i.test(params.question)
     || (!!params.catalog?.productUrl && params.catalog.productUrl.includes('{id}') && params.question.includes(params.catalog.productUrl.split('{id}')[0]!));
-  const wantsCatalog = linksModel || (!!u && (['stock', 'pick', 'buy'].includes(u.intent) || !!u.article || !!u.model || !!u.size));
+  const wantsCatalog = linksModel || (!!u && (['stock', 'pick', 'buy'].includes(u.intent) || !!u.article || !!u.model || !!u.size || !!u.kind));
   if (params.catalog?.url && wantsCatalog) {
     try {
       catalog = await loadCatalog(params.catalog);
       const context = [...history.map((m) => m.content), params.question].join('\n');
       const shown = shownProductIds(history.filter((m) => m.role === 'assistant').map((m) => m.content), params.catalog.productUrl);
       match = searchCatalog(catalog, {
-        article: u?.article, model: u?.model, size: u?.size, gender: u?.gender, season: u?.season,
+        article: u?.article, model: u?.model, kind: u?.kind, size: u?.size, gender: u?.gender, season: u?.season,
         color: u?.color, maxPrice: u?.maxPrice, context, exclude: shown, pick: u?.intent === 'pick',
       }, params.catalog.productUrl);
       // Подбор показываем, только когда клиент о нём просил; карточка модели — всегда.
@@ -357,4 +369,11 @@ function parseAnswer(raw: string): { answer: string; confidence: number; needsHu
     // а не отправляем клиенту сырой текст неизвестного качества.
     return { answer: '', confidence: 0, needsHuman: true };
   }
+}
+
+/** Ответ не покупателю: спасибо, передадим руководству. */
+export function partnerReply(lang: 'ru' | 'kk') {
+  return lang === 'kk'
+    ? 'Сәлеметсіз бе! Ұсынысыңызға рахмет — басшылыққа жеткіземін, сізбен байланысады.'
+    : 'Здравствуйте! Спасибо за предложение — передам его руководству, с вами свяжутся.';
 }

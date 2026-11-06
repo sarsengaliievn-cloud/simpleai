@@ -23,7 +23,7 @@ type Turn = {
   photos?: Array<{ url: string; caption: string }>;
 };
 
-const INTENT: Record<string, string> = { stock: 'наличие', pick: 'подбор', buy: 'готов купить', info: 'вопрос', other: 'другое' };
+const INTENT: Record<string, string> = { stock: 'наличие', pick: 'подбор', buy: 'готов купить', info: 'вопрос', partner: 'не покупатель', other: 'другое' };
 
 export function Playground({ tone, threshold, documents }: { tone: string; threshold: number; documents: number }) {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -69,7 +69,7 @@ export function Playground({ tone, threshold, documents }: { tone: string; thres
                   ? `склад недоступен: ${json.catalog.error}`
                   : json.catalog.mode === 'none' ? 'на складе не нашёл подходящего' : `склад: ${json.catalog.mode === 'product' ? 'нашёл модель' : `подобрал ${json.catalog.count}`}`
                 : undefined,
-              order: json.order ? `🛒 Передал бы менеджеру:\n${json.order.summary}` : undefined,
+              order: json.order ? (json.understanding?.intent === 'partner' ? `→ ${json.order.summary}` : `🛒 Передал бы менеджеру:\n${json.order.summary}`) : undefined,
               photos: Array.isArray(json.photos) ? json.photos : undefined,
             }
           : { role: 'assistant', content: (json.error ?? `Ошибка ${res.status}`) + (json.detail ? `\n\nПодробно: ${json.detail}` : ''), service: true },

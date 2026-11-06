@@ -20,6 +20,8 @@ export type CatalogItem = {
   season: string;
   color: string;
   gender: string;
+  /** Описание модели — по нему тоже ищем стиль («классический», «на меху»). */
+  description: string;
   price: number;
   oldPrice: number | null;
   sizes: Array<{ size: string; inStock: boolean }>;
@@ -171,6 +173,7 @@ export function normalizeCatalog(raw: unknown): Catalog {
     return {
       id: str(o.id, 128), article: str(o.article, 60), name: str(o.name, 200), brand: str(o.brand, 80),
       category: str(o.category, 80), season: str(o.season, 60), color: str(o.color, 60), gender: str(o.gender, 10),
+      description: str(o.description, 400),
       price, oldPrice: oldPrice > price ? oldPrice : null, sizes, avail,
     };
   }).filter((i) => i.id && i.name);
@@ -194,6 +197,8 @@ const SEASONS: Array<[RegExp, RegExp]> = [
 ];
 
 export type CatalogQuery = {
+  /** Тип или стиль словами клиента: «классические», «кроссовки», «етік». */
+  kind?: string | null;
   article?: string | null;
   model?: string | null;
   size?: string | null;
@@ -211,6 +216,41 @@ export type CatalogQuery = {
   pick?: boolean;
 };
 
+/**
+ * Тип и стиль обуви: слова клиента → основы, которые ищем в категории,
+ * названии и описании модели. «Классические» — это и категория «Классика»,
+ * и «туфли», «лоферы», «оксфорды».
+ */
+const KINDS: Array<[RegExp, string[]]> = [
+  [/класс|classic|строг|офис|делов/i, ['класс', 'classic', 'туфл', 'лофер', 'оксфорд', 'дерби', 'брог', 'монк']],
+  [/спорт|sport|кросс|бег|run/i, ['спорт', 'кросс', 'sneaker', 'run', 'кед']],
+  [/кед/i, ['кед', 'слипон']],
+  [/ботин|бәтеңке|батинк|челси|boot/i, ['ботин', 'челси', 'boot', 'бәтеңке']],
+  [/сапог|етік|етик|ботфорт/i, ['сапог', 'ботфорт', 'етік']],
+  [/туфл|лодоч|каблук|лофер|балетк/i, ['туфл', 'лодоч', 'каблук', 'лофер', 'балетк']],
+  [/дутик|дутыш|пухов/i, ['дутик', 'дутыш']],
+  [/угг|ugg|унт/i, ['угг', 'ugg', 'унт']],
+  [/сандал|босонож|шлеп|тапоч|сланц/i, ['сандал', 'босонож', 'шлеп', 'тапоч', 'сланц']],
+];
+
+/** Основы для поиска по типу: из словаря или первые буквы слов клиента. */
+export function kindStems(kind: string) {
+  const k = kind.toLowerCase().replace(/ё/g, 'е');
+  const known = KINDS.filter(([re]) => re.test(k)).flatMap(([, stems]) => stems);
+  if (known.length) return [...new Set(known)];
+  return k.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 4).map((w) => w.slice(0, Math.max(4, w.length - 3)));
+}
+
+export function matchesKind(item: CatalogItem, stems: string[]) {
+  const hay = norm(`${item.category} ${item.name} ${item.description}`);
+  return stems.some((st) => hay.includes(st));
+}
+
+/** Какие категории есть — чтобы ассистент мог предложить похожее. */
+export function catalogCategories(catalog: Catalog) {
+  return [...new Set(catalog.items.map((i) => i.category).filter(Boolean))].slice(0, 20);
+}
+
 export type CatalogMatch = {
   mode: 'product' | 'pick' | 'none';
   items: CatalogItem[];
@@ -218,6 +258,8 @@ export type CatalogMatch = {
   /** Подбор: сколько всего подходит и сколько из них клиент ещё не видел. */
   total?: number;
   unseen?: number;
+  /** Нужного типа («классические») под запрос нет — показаны похожие. */
+  kindMissing?: string;
 };
 
 /** Найти модель, о которой говорит клиент, или подобрать подходящие. */
@@ -275,14 +317,15 @@ export function searchCatalog(catalog: Catalog, q: CatalogQuery, productUrl?: st
     }
   }
 
-  // 4. Подбор по признакам: пол, сезон, размер, цвет, бюджет.
-  const hasFilter = q.gender || q.season || q.color || q.maxPrice || size;
+  // 4. Подбор по признакам: тип, пол, сезон, размер, цвет, бюджет.
+  const hasFilter = q.kind || q.gender || q.season || q.color || q.maxPrice || size;
   if (!hasFilter) return { mode: 'none', items: [], size };
+  const stems = q.kind ? kindStems(q.kind) : [];
 
   const season = q.season ? SEASONS.find(([client]) => client.test(q.season!))?.[1] ?? null : null;
   const color = q.color ? norm(q.color).slice(0, 4) : '';
   const gender = q.gender && GENDER_LABEL[q.gender] ? q.gender : null;
-  const picked = catalog.items.filter((i) => {
+  const fits = catalog.items.filter((i) => {
     if (gender && i.gender && i.gender !== gender && i.gender !== 'uni') return false;
     if (season && !season.test(i.season)) return false;
     if (color && !norm(i.color).includes(color)) return false;
@@ -290,6 +333,11 @@ export function searchCatalog(catalog: Catalog, q: CatalogQuery, productUrl?: st
     if (size && !i.sizes.some((s) => s.size === size && s.inStock)) return false;
     return i.sizes.some((s) => s.inStock);
   });
+  // Тип («классические»): только подходящие. Таких нет — честно скажем и
+  // покажем похожие по остальным признакам, а не пустоту.
+  const ofKind = stems.length ? fits.filter((i) => matchesKind(i, stems)) : fits;
+  const kindMissing = stems.length && ofKind.length === 0 && fits.length > 0 ? q.kind!.trim() : undefined;
+  const picked = kindMissing ? fits : ofKind;
   // Уже показанные — в конец: «какие ещё есть?» должно давать новые модели.
   const seen = q.exclude ?? new Set<string>();
   const fresh = picked.filter((i) => !seen.has(i.id));
@@ -306,7 +354,7 @@ export function searchCatalog(catalog: Catalog, q: CatalogQuery, productUrl?: st
     [head[i], head[j]] = [head[j]!, head[i]!];
   }
   const chosen = [...head.filter((i) => !seen.has(i.id)), ...head.filter((i) => seen.has(i.id))].slice(0, 5);
-  return { mode: chosen.length ? 'pick' : 'none', items: chosen, size, total: picked.length, unseen: fresh.length };
+  return { mode: chosen.length ? 'pick' : 'none', items: chosen, size, total: picked.length, unseen: fresh.length, ...(kindMissing ? { kindMissing } : {}) };
 }
 
 /** Какие модели бот уже показывал: ссылки #p=… и ссылки на модель в его сообщениях. */
@@ -354,7 +402,7 @@ export function sizeAvailability(catalog: Catalog, item: CatalogItem, size: stri
 /** Строка модели для ассистента и менеджера. */
 export function describeItem(catalog: Catalog, item: CatalogItem, size: string | null, source: CatalogSource) {
   const lines: string[] = [];
-  const attrs = [item.brand, GENDER_LABEL[item.gender] ?? '', item.season, item.color].filter(Boolean).join(', ');
+  const attrs = [item.category, item.brand, GENDER_LABEL[item.gender] ?? '', item.season, item.color].filter(Boolean).join(', ');
   lines.push(`Модель: ${item.name}${item.article ? ` (арт. ${item.article})` : ''}${attrs ? ` — ${attrs}` : ''}.`);
   lines.push(`Цена: ${money(item.price)}${item.oldPrice ? ` (без скидки ${money(item.oldPrice)})` : ''}.`);
   const inStock = item.sizes.filter((s) => s.inStock).map((s) => s.size);
@@ -390,9 +438,15 @@ export function catalogBlock(catalog: Catalog, match: CatalogMatch, source: Cata
         ? 'КАТАЛОГ: под описание клиента подходят несколько моделей — уточни, какую он имеет в виду.'
         : `КАТАЛОГ: модель, о которой спрашивает клиент (данные склада на сейчас). Ответь прямо по ней: есть ли она и в каких магазинах${match.size ? '' : '; размер клиент не назвал — перечисли размеры в наличии и спроси, какой нужен'}. Не отправляй клиента искать самому в каталоге.`
       : `КАТАЛОГ: модели в наличии под запрос клиента${match.size ? ` (размер ${match.size})` : ''} — предложи 2–3 из них со ссылками.` +
+        (match.kindMissing ? ` Моделей «${match.kindMissing}» под этот запрос сейчас нет — честно скажи об этом и предложи эти похожие.` : '') +
         (match.unseen === 0 ? ' Новых моделей под этот запрос больше нет — скажи об этом и предложи другой сезон, цвет или бюджет.' : '') +
         (!match.size ? ' Размер не назван — в конце спроси размер, чтобы подобрать точнее.' : '');
-  return [head, ...match.items.map((i, n) => `${n + 1}) ${describeItem(catalog, i, match.size, source)}`)].join('\n\n');
+  const cats = match.mode === 'pick' ? catalogCategories(catalog) : [];
+  return [
+    head,
+    ...match.items.map((i, n) => `${n + 1}) ${describeItem(catalog, i, match.size, source)}`),
+    ...(cats.length ? [`Категории в каталоге: ${cats.join(', ')}.`] : []),
+  ].join('\n\n');
 }
 
 /** Список магазинов — чтобы ассистент не путал города и адреса. */

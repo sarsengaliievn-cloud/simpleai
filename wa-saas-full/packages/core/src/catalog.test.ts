@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { normalizeCatalog, searchCatalog, catalogBlock, describeItem, normSize, assertPublicUrl, shownProductIds } from './catalog.js';
+import { normalizeCatalog, searchCatalog, catalogBlock, describeItem, normSize, assertPublicUrl, shownProductIds, kindStems } from './catalog.js';
 import { parseUnderstanding } from './ai/understand.js';
 import { draftOrder, orderQuestion, orderConfirmation } from './ai/rag.js';
 
@@ -10,7 +10,7 @@ const source = { url: 'https://example.kz/c', productUrl: 'https://sklad-obuv.we
 
 describe('каталог склада', () => {
   it('читает витрину склада', () => {
-    expect(catalog.items).toHaveLength(5);
+    expect(catalog.items).toHaveLength(6);
     expect(catalog.stores.find((s) => s.id === 'w1')?.warehouse).toBe(true);
   });
   it('размер из слов клиента', () => {
@@ -73,7 +73,7 @@ describe('разбор сообщения', () => {
 });
 
 describe('готов купить', () => {
-  const base = { query: '', intent: 'buy' as const, lang: 'ru' as const, article: '', model: '', size: '', gender: '', season: '', color: '', maxPrice: null, city: '', delivery: '', payment: '' };
+  const base = { query: '', intent: 'buy' as const, lang: 'ru' as const, article: '', model: '', size: '', gender: '', kind: '', season: '', color: '', maxPrice: null, city: '', delivery: '', payment: '' };
   it('не хватает модели, размера и города — спросить разом', () => {
     const o = draftOrder(base, catalog, null, source);
     expect(o.missing).toEqual(['model', 'size', 'city']);
@@ -135,5 +135,36 @@ describe('подбор после показанных моделей', () => {
     const m = searchCatalog(catalog, { gender: 'w', season: 'зима', pick: true, context: 'Бот: Зимние сапоги — https://sklad-obuv.web.app/shop/#p=P101', exclude: new Set(['P101']) }, source.productUrl);
     expect(m.mode).toBe('pick');
     expect(m.items[0]!.id).toBe('P102');
+  });
+});
+
+describe('тип и стиль обуви', () => {
+  it('«классические зимние» — только классика', () => {
+    const m = searchCatalog(catalog, { kind: 'классические', season: 'зима', gender: 'm' });
+    expect(m.mode).toBe('pick');
+    expect(m.items.map((i) => i.id)).toEqual(['P105']);
+    expect(catalogBlock(catalog, m, source)).toMatch(/Категории в каталоге: .*Классика/);
+  });
+  it('по-казахски: «классикалық»', () => {
+    expect(searchCatalog(catalog, { kind: 'классикалық', season: 'қыс' }).items.map((i) => i.id)).toEqual(['P105']);
+  });
+  it('по описанию и названию: «сапоги»', () => {
+    expect(searchCatalog(catalog, { kind: 'сапоги' }).items.map((i) => i.id)).toEqual(['P101']);
+    expect(searchCatalog(catalog, { kind: 'етік' }).items.map((i) => i.id)).toEqual(['P101']);
+  });
+  it('нужного типа нет — показываем похожие и честно говорим', () => {
+    const m = searchCatalog(catalog, { kind: 'классические', season: 'зима', gender: 'w' });
+    expect(m.kindMissing).toBe('классические');
+    expect(m.items.length).toBeGreaterThan(0);
+    expect(catalogBlock(catalog, m, source)).toMatch(/Моделей «классические» под этот запрос сейчас нет/);
+  });
+  it('незнакомый тип — по началу слова', () => {
+    expect(kindStems('мокасины')).toEqual(['мокас']);
+  });
+});
+
+describe('не покупатель', () => {
+  it('предложение о сотрудничестве распознаётся', () => {
+    expect(parseUnderstanding('{"query":"Предлагают разместить товары на маркетплейсе","intent":"partner","lang":"ru"}', 'x')?.intent).toBe('partner');
   });
 });

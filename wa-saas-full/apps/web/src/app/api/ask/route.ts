@@ -1,5 +1,5 @@
 import { requireCompany } from '@/lib/session';
-import { answerQuestion, splitReply, hasBalance, recordUsage, billingProvider, formatTiyn, aiErrorReason, orderQuestion, orderConfirmation } from '@wa/core';
+import { answerQuestion, splitReply, hasBalance, recordUsage, billingProvider, formatTiyn, aiErrorReason, orderQuestion, orderConfirmation, partnerReply } from '@wa/core';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,6 +61,15 @@ export async function POST(request: Request) {
       model: result.ai.model,
       ...result.usage,
     });
+
+    if (result.partner) {
+      const text = partnerReply(result.partner.lang);
+      return Response.json({
+        answer: text, cost: formatTiyn(charged), parts: [text], confidence: 100, needsHuman: false,
+        threshold: config.confidenceThreshold, hits: [], understanding: result.understanding,
+        order: { summary: 'Пишет не покупатель (сотрудничество, реклама) — бот не рассказывает про товары, диалог уходит людям.', missing: [] },
+      });
+    }
 
     // Готов купить: как в WhatsApp — один раз уточнить, потом передать менеджеру.
     if (result.order) {

@@ -93,7 +93,7 @@ export function DealPanel({
 
       {deal.archiveReason && (
         <div className="notice spread" style={{ alignItems: 'center', gap: 8 }}>
-          <span className="small">Не продажа: {deal.archiveReason === 'spam' ? 'спам' : 'просто вопрос'} — на доске не показывается.</span>
+          <span className="small">Не продажа: {deal.archiveReason === 'spam' ? 'спам' : deal.archiveReason === 'b2b' ? 'пишет не покупатель (сотрудничество, реклама)' : 'просто вопрос'} — на доске не показывается.</span>
           <button className="btn btn-ghost btn-sm" disabled={pending} onClick={() => run(() => restoreDealAction(deal.id))}>Вернуть в работу</button>
         </div>
       )}

@@ -7,7 +7,7 @@ import type { AIProvider, ChatMessage } from './provider.js';
  * что нужно для склада и для передачи менеджеру: модель, размер, город.
  */
 
-export type Intent = 'stock' | 'pick' | 'buy' | 'info' | 'other';
+export type Intent = 'stock' | 'pick' | 'buy' | 'info' | 'partner' | 'other';
 
 export type Understanding = {
   /** Вопрос клиента полностью, по-русски, с учётом прошлых сообщений — по нему ищем в базе знаний. */
@@ -18,6 +18,8 @@ export type Understanding = {
   model: string;
   size: string;
   gender: string;
+  /** Тип или стиль: «классические», «кроссовки», «сапоги», «етік». */
+  kind: string;
   season: string;
   color: string;
   maxPrice: number | null;
@@ -30,7 +32,7 @@ const PROMPT = `Ты разбираешь сообщение клиента ин
 Учитывай всю переписку: «а 42 есть?» относится к модели, о которой говорили раньше; модель, размер и город могли прозвучать в прошлых сообщениях.
 
 Верни строго один JSON-объект (json), без пояснений:
-{"query": "...", "intent": "stock|pick|buy|info|other", "lang": "ru|kk", "article": "", "model": "", "size": "", "gender": "m|w|kids|", "season": "", "color": "", "max_price": 0, "city": "", "delivery": "", "payment": ""}
+{"query": "...", "intent": "stock|pick|buy|info|partner|other", "lang": "ru|kk", "article": "", "model": "", "size": "", "gender": "m|w|kids|", "kind": "", "season": "", "color": "", "max_price": 0, "city": "", "delivery": "", "payment": ""}
 
 query — что спрашивает клиент, одним понятным предложением на русском, с подставленным контекстом. Пример: «41 размер бар ма, қанша тұрады» → «Есть ли 41 размер этой модели и сколько она стоит?».
 intent:
@@ -38,10 +40,11 @@ intent:
 - pick — просит подобрать или показать варианты (сезон, пол, размер, бюджет);
 - buy — готов купить или оформить: «беру», «хочу заказать», «как оплатить», «алам», «аламын», «тапсырыс беремін», «оформите»;
 - info — вопрос о доставке, оплате, адресах, обмене, акциях и т.п.;
+- partner — пишет не покупатель: предлагает сотрудничество, маркетплейс, рекламу, продвижение, поставки, услуги, ищет работу, рассылка;
 - other — всё остальное.
 lang — kk, если клиент пишет в основном по-казахски, иначе ru.
 article — артикул, если назван; model — название или описание модели словами клиента («чёрные зимние ботинки»), если из переписки понятно, о какой речь; size — размер числом («41»).
-gender: m — мужская, w — женская, kids — детская, пусто — не сказано. season — сезон словом клиента («зима»). max_price — бюджет в тенге числом, 0 — не сказан.
+gender: m — мужская, w — женская, kids — детская, пусто — не сказано. kind — тип или стиль обуви словами клиента: «классические», «кроссовки», «ботинки», «сапоги», «туфли», «дутики», «классикалық», «етік»; пусто — не сказан. season — сезон словом клиента («зима»). max_price — бюджет в тенге числом, 0 — не сказан.
 city — город доставки; delivery — как хочет получить («Казпочта», «заберу в магазине», «курьер»); payment — как платит («Kaspi», «наличные»).
 Клиент мог прислать карточку модели с сайта (строки «Артикул: …», «Цена: …», ссылка) с вопросом «бар ма?», «есть?» — это intent stock, article бери из карточки. Строка «Город:» в такой карточке — город клиента.
 Просит «ещё», «другие», «басқа» — тот же intent pick с теми же признаками, что раньше.
@@ -53,7 +56,7 @@ function transcript(history: ChatMessage[], question: string) {
   return `${lines.length ? `Переписка:\n${lines.join('\n')}\n\n` : ''}Новое сообщение клиента: ${question.slice(0, 1500)}`;
 }
 
-const INTENTS = new Set<Intent>(['stock', 'pick', 'buy', 'info', 'other']);
+const INTENTS = new Set<Intent>(['stock', 'pick', 'buy', 'info', 'partner', 'other']);
 const s = (v: unknown, max = 120) => (typeof v === 'string' ? v.trim().slice(0, max) : typeof v === 'number' && v ? String(v) : '');
 
 export function parseUnderstanding(raw: string, fallback: string): Understanding | null {
@@ -79,6 +82,7 @@ export function parseUnderstanding(raw: string, fallback: string): Understanding
     model: s(d.model, 120),
     size: s(d.size, 8),
     gender,
+    kind: s(d.kind, 40),
     season: s(d.season, 30),
     color: s(d.color, 30),
     maxPrice: price > 0 ? price : null,
