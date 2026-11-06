@@ -108,3 +108,26 @@ export async function numberAccessToken(db: TenantClient, phoneNumberRowId: stri
     return null;
   }
 }
+
+/** Шаблон — единственное, что можно отправить клиенту, который молчит больше 24 часов. */
+export async function sendWhatsAppTemplate(
+  db: TenantClient,
+  input: { phoneNumberRowId: string; to: string; templateName: string; languageCode: string; variables: string[] },
+): Promise<SendResult> {
+  const { number, accessToken } = await resolveNumber(db, input.phoneNumberRowId);
+  try {
+    return await getProvider().sendTemplate({
+      phoneNumberId: number.phoneNumberId,
+      to: input.to,
+      templateName: input.templateName,
+      languageCode: input.languageCode,
+      variables: input.variables,
+      accessToken,
+    });
+  } catch (error) {
+    if (error instanceof WhatsAppSendError && error.authProblem && error.code !== 'no_token') {
+      await flagAuthProblem(db, number.accountId, number.id);
+    }
+    throw error;
+  }
+}

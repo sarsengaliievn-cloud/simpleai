@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { sendMessage, takeOver, returnToAi, markRead } from '@/app/conversations/actions';
 import { initials, avatarColor, clockWithDay } from '@/lib/format';
 import { CloseChat } from './CloseChat';
+import { TemplateSender, type ApprovedTemplate } from './TemplateSender';
 
 type Message = {
   id: string;
@@ -80,6 +81,7 @@ export function ThreadView({
   backHref = '/conversations',
   lostReasons = [],
   dealHref,
+  templates = [],
 }: {
   conversation: Conversation;
   messages: Message[];
@@ -89,6 +91,8 @@ export function ThreadView({
   lostReasons?: string[];
   /** На узком экране сделка прячется — кнопка «Сделка» открывает её поверх. */
   dealHref?: string;
+  /** Одобренные шаблоны — для клиентов, которые молчат больше 24 часов. */
+  templates?: ApprovedTemplate[];
 }) {
   const [text, setText] = useState('');
   const [quickOpen, setQuickOpen] = useState(false);
@@ -222,9 +226,10 @@ export function ThreadView({
                   {m.text ? 'Голосовое · расшифровка' : 'Голосовое сообщение'}
                 </span>
               )}
-              {m.type !== 'TEXT' && m.type !== 'AUDIO' && <Attachment m={m} />}
+              {m.type === 'TEMPLATE' && <span className="tiny muted" style={{ display: 'block', marginBottom: 3 }}>Шаблон</span>}
+              {m.type !== 'TEXT' && m.type !== 'AUDIO' && m.type !== 'TEMPLATE' && <Attachment m={m} />}
               {m.type === 'AUDIO' && m.media && <Attachment m={m} />}
-              {m.text && <span className="msg-text" style={{ marginTop: m.type !== 'TEXT' ? 4 : 0 }}>{m.text}</span>}
+              {m.text && <span className="msg-text" style={{ marginTop: m.type !== 'TEXT' && m.type !== 'TEMPLATE' ? 4 : 0 }}>{m.text}</span>}
               <span className="msg-t" suppressHydrationWarning>
                 {clockWithDay(m.createdAt)}
                 {AUTHOR[m.authorType] ? ` · ${AUTHOR[m.authorType]}${m.fromPhone ? ' с телефона' : ''}` : ''}
@@ -236,7 +241,10 @@ export function ThreadView({
         <div ref={bottom} />
       </div>
 
-      <div className="thread-f">
+      <div className={`thread-f ${conversation.windowOpen ? '' : 'win-closed'}`}>
+        {!conversation.windowOpen && (
+          <TemplateSender conversationId={conversation.id} customerName={conversation.customerName} templates={templates} />
+        )}
         {error && (
           <div className="chip chip-bad" style={{ marginBottom: 9, height: 'auto', padding: '6px 10px' }}>
             {error}

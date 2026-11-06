@@ -21,7 +21,7 @@ export const TENANT_MODELS = new Set([
   'DealEvent',
   'AiUsage',
   'BalanceTransaction',
-  'TopupRequest', 'QuickReply',
+  'TopupRequest', 'QuickReply', 'MessageTemplate',
 ]);
 
 /**

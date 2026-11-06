@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { can, lostReasonsOf } from '@wa/core';
 import { loadThread } from '@/lib/thread';
+import { approvedTemplates } from '@/lib/templates';
 import { requireCompany } from '@/lib/session';
 import { Shell } from '@/components/Shell';
 import { ConversationList } from '@/components/ConversationList';
@@ -71,6 +72,7 @@ export default async function ConversationsPage({ searchParams }: Props) {
   const active = activeId ? await loadThread(db, { id: activeId, ...ownConversations }) : null;
 
   const quickReplies = active ? await db.quickReply.findMany({ orderBy: { position: 'asc' }, select: { id: true, title: true, text: true } }) : [];
+  const templates = active && !active.conversation.windowOpen ? await approvedTemplates(db, active.accountId) : [];
 
   const [stages, deal, members] = active
     ? await Promise.all([
@@ -114,6 +116,7 @@ export default async function ConversationsPage({ searchParams }: Props) {
             backHref={`/conversations?${new URLSearchParams({ filter, ...(query ? { q: query } : {}) })}`}
             dealHref={`/conversations?${new URLSearchParams({ filter, ...(query ? { q: query } : {}), id: active.conversation.id, deal: '1' })}`}
             lostReasons={lostReasonsOf(ctx.company)}
+            templates={templates}
             conversation={active.conversation}
             messages={active.messages}
           />

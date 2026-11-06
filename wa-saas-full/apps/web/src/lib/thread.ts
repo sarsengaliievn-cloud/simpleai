@@ -5,11 +5,13 @@ import type { TenantClient } from '@wa/db';
 export async function loadThread(db: TenantClient, where: { id: string; assigneeId?: string }) {
   const c = await db.conversation.findFirst({
     where,
-    include: { customer: true, messages: { orderBy: { createdAt: 'asc' }, take: 200 } },
+    include: { customer: true, phoneNumber: { select: { accountId: true } }, messages: { orderBy: { createdAt: 'asc' }, take: 200 } },
   });
   if (!c) return null;
   return {
     customerId: c.customer.id,
+    /** Аккаунт WhatsApp номера диалога — шаблоны отправляются только свои. */
+    accountId: c.phoneNumber?.accountId ?? null,
     conversation: {
       id: c.id,
       mode: c.mode,

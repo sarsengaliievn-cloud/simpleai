@@ -8,6 +8,7 @@ import { StageEditor } from '@/components/crm/StageEditor';
 import { DealFilters } from '@/components/crm/DealFilters';
 import { loadDeal, loadMembers, loadStages, purchaseCounts } from '@/lib/crm';
 import { loadThread } from '@/lib/thread';
+import { approvedTemplates } from '@/lib/templates';
 import { ThreadView } from '@/components/ThreadView';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { money } from '@/lib/format';
@@ -124,6 +125,7 @@ export default async function DealsPage({ searchParams }: Props) {
   // Переписка прямо в карточке: сотрудники не уходят в «Диалоги» и не теряются.
   const thread = selected?.conversationId ? await loadThread(db, { id: selected.conversationId }) : null;
   const quickReplies = thread ? await db.quickReply.findMany({ orderBy: { position: 'asc' }, select: { id: true, title: true, text: true } }) : [];
+  const templates = thread && !thread.conversation.windowOpen ? await approvedTemplates(db, thread.accountId) : [];
   const params = (extra: Record<string, string>) => {
     const sp = new URLSearchParams({ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...(filter ? { f: filter } : {}), ...extra });
     return `/deals${sp.size ? `?${sp}` : ''}`;
@@ -204,6 +206,7 @@ export default async function DealsPage({ searchParams }: Props) {
                     messages={thread.messages}
                     quickReplies={quickReplies}
                     lostReasons={lostReasons}
+                    templates={templates}
                     backHref={params({})}
                   />
                   <AutoRefresh active intervalMs={8000} />

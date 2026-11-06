@@ -4,6 +4,8 @@ import { Sidebar } from '@/components/Sidebar';
 import { isSuperAdmin } from '@/lib/admin';
 import { saveCompany, addQuickReply, deleteQuickReply } from './actions';
 import { timeAgo, agoText } from '@/lib/format';
+import { syncTemplates } from '@wa/core';
+import { TemplatesManager } from '@/components/TemplatesManager';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +14,10 @@ const ACTIONS: Record<string, string> = {
   'ai.config.updated': 'Изменены настройки ассистента',
   'whatsapp.number.connected': 'Подключён номер WhatsApp',
   'whatsapp.number.disconnected': 'Отключён номер WhatsApp',
+  'template.created': 'Создан шаблон WhatsApp',
+  'ai.catalog.updated': 'Изменён склад для ассистента',
+  'team.member.added': 'Добавлен сотрудник',
+  'team.member.removed': 'Удалён сотрудник',
 };
 
 export default async function SettingsPage() {
@@ -19,9 +25,14 @@ export default async function SettingsPage() {
   const { company, db, user, role } = ctx;
   const extras = await sidebarExtras(ctx);
 
-  const [logs, quick] = await Promise.all([
+  // Шаблоны на проверке — заодно спрашиваем Meta, не одобрила ли уже.
+  const waiting = await db.messageTemplate.count({ where: { status: { in: ['PENDING', 'IN_APPEAL'] }, updatedAt: { lt: new Date(Date.now() - 60_000) } } });
+  if (waiting) await syncTemplates(db).catch(() => 0);
+
+  const [logs, quick, templates] = await Promise.all([
     db.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 30 }),
     db.quickReply.findMany({ orderBy: { position: 'asc' } }),
+    db.messageTemplate.findMany({ orderBy: { createdAt: 'asc' } }),
   ]);
 
   return (
@@ -99,6 +110,11 @@ export default async function SettingsPage() {
               <button className="btn" type="submit">Добавить ответ</button>
             </form>
           </section>
+
+          <TemplatesManager
+            company={company.name}
+            templates={templates.map((t) => ({ id: t.id, title: t.title, language: t.language, category: t.category, body: t.body, variables: t.variables, status: t.status, rejectedReason: t.rejectedReason }))}
+          />
 
           <div className="card" style={{ overflow: 'hidden' }}>
             <div className="card-p" style={{ borderBottom: '1px solid var(--line)', fontWeight: 700 }}>

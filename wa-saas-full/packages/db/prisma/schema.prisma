@@ -97,6 +97,7 @@ model Company {
   /// Без внутреннего баланса: за ИИ платит владелец платформы напрямую провайдеру.
   /// Расход считается для статистики, но не списывается, и бот не останавливается.
   billingExempt Boolean @default(false)
+  messageTemplates MessageTemplate[]
   /// Свои причины отказа. Пусто — стандартный список.
   lostReasons   String[] @default([])
   /// Новые клиенты от бота — по очереди менеджерам на смене.
@@ -721,4 +722,35 @@ model QuickReply {
 
   @@index([companyId, position])
   @@map("quick_replies")
+}
+
+/// Шаблон сообщения WhatsApp: единственный способ написать клиенту, если он
+/// молчит больше 24 часов. Текст проверяет Meta, статус подтягиваем оттуда.
+model MessageTemplate {
+  id             String   @id @default(uuid()) @db.Uuid
+  companyId      String   @db.Uuid
+  accountId      String   @db.Uuid
+  /// Название для людей: «Напоминание», «Трек-номер».
+  title          String
+  /// Имя в Meta: латиница, цифры и подчёркивания.
+  name           String
+  language       String   @default("ru")
+  /// MARKETING — реклама и напоминания, UTILITY — о заказе и доставке.
+  category       String
+  /// Текст с {{1}}, {{2}} — так его видит Meta.
+  body           String
+  /// Что подставлять по порядку: «имя» — имя клиента само, остальное вводит менеджер.
+  variables      String[] @default([])
+  /// PENDING, APPROVED, REJECTED, PAUSED, DISABLED.
+  status         String   @default("PENDING")
+  metaId         String?
+  rejectedReason String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, name, language])
+  @@index([companyId, status])
+  @@map("message_templates")
 }

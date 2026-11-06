@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireCompany } from '@/lib/session';
-import { assertCanSendFreeText, sendWhatsAppText, markWhatsAppRead, sendErrorText, closeConversation, reopenConversation, parseAmount, CrmError, CLOSE_OUTCOMES, type CloseOutcome } from '@wa/core';
+import { assertCanSendFreeText, sendWhatsAppText, markWhatsAppRead, sendErrorText, closeConversation, reopenConversation, parseAmount, CrmError, CLOSE_OUTCOMES, type CloseOutcome, sendWhatsAppTemplate, renderTemplate, NAME_VARIABLE } from '@wa/core';
 
 /**
  * Переключение режима диалога. Системное сообщение пишется только если
@@ -110,6 +110,76 @@ export async function sendMessage(conversationId: string, text: string) {
     where: { id: conversationId },
     data: { lastMessageAt: now, unreadCount: 0 },
   });
+  // Написали в закрытый диалог — значит, работа с клиентом снова идёт.
+  if (conversation.status === 'CLOSED') await reopenConversation(db, conversationId, { actorName: user.firstName });
+
+  revalidatePath('/conversations');
+  revalidatePath('/deals');
+  return { ok: true as const };
+}
+
+/**
+ * Шаблон — когда клиент молчит больше 24 часов. Имя подставляется само,
+ * остальные поля (трек-номер) вписывает менеджер.
+ */
+export async function sendTemplateAction(conversationId: string, templateId: string, values: Record<string, string>) {
+  const { db, user, ownConversations } = await requireCompany();
+  const [conversation, template] = await Promise.all([
+    db.conversation.findFirst({ where: { id: conversationId, ...ownConversations }, include: { customer: true, phoneNumber: true } }),
+    db.messageTemplate.findFirst({ where: { id: templateId } }),
+  ]);
+  if (!conversation) return { ok: false as const, error: 'Диалог не найден' };
+  if (!template || template.status !== 'APPROVED') return { ok: false as const, error: 'Этот шаблон ещё не одобрен Meta' };
+  if (!conversation.phoneNumber || conversation.phoneNumber.status === 'DISCONNECTED') {
+    return { ok: false as const, error: 'К диалогу не привязан активный номер WhatsApp' };
+  }
+  if (template.accountId !== conversation.phoneNumber.accountId) {
+    return { ok: false as const, error: 'Этот шаблон создан для другого номера WhatsApp' };
+  }
+
+  const variables: string[] = [];
+  for (const label of template.variables) {
+    // Meta не принимает пустое поле, переносы строк и табуляцию в значениях.
+    const raw = label === NAME_VARIABLE
+      ? (values[label]?.trim() || conversation.customer.name?.trim() || 'уважаемый клиент')
+      : (values[label] ?? '').trim();
+    const value = raw.replace(/[\n\t]+/g, ' ').replace(/ {4,}/g, '   ').slice(0, 200);
+    if (!value) return { ok: false as const, error: `Заполните поле «${label}»` };
+    variables.push(value);
+  }
+
+  let providerMessageId: string;
+  try {
+    const result = await sendWhatsAppTemplate(db, {
+      phoneNumberRowId: conversation.phoneNumber.id,
+      to: conversation.customer.waId,
+      templateName: template.name,
+      languageCode: template.language,
+      variables,
+    });
+    providerMessageId = result.providerMessageId;
+  } catch (error) {
+    console.error('[send] шаблон не принят:', (error as Error).message);
+    return { ok: false as const, error: sendErrorText(error) };
+  }
+
+  const now = new Date();
+  await db.message.create({
+    data: {
+      conversationId,
+      direction: 'OUTBOUND',
+      authorType: 'MANAGER',
+      authorUserId: user.id,
+      type: 'TEMPLATE',
+      text: renderTemplate(template.body, variables),
+      providerMessageId,
+      status: 'SENT',
+      sentAt: now,
+      metadata: { template: template.name, templateTitle: template.title },
+    } as never,
+  });
+  await db.conversation.updateMany({ where: { id: conversationId }, data: { lastMessageAt: now, unreadCount: 0 } });
+  if (conversation.status === 'CLOSED') await reopenConversation(db, conversationId, { actorName: user.firstName });
 
   revalidatePath('/conversations');
   revalidatePath('/deals');

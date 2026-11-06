@@ -526,8 +526,8 @@ th.num{text-align:right}
 .warn-t{color:var(--amber)}
 
 /* ===== Быстрые ответы ===== */
-.qr-list{list-style:none;margin:0 0 16px;padding:0;display:grid;gap:8px}
-.qr-list li{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm)}
+.qr-list,.tpl-list{list-style:none;margin:0 0 16px;padding:0;display:grid;gap:8px}
+.qr-list li,.tpl-list li{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-sm)}
 .qr-text{white-space:pre-line;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin-top:2px}
 .qr-pop{position:absolute;left:0;right:0;bottom:calc(100% + 6px);background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r);box-shadow:var(--sh-lg);max-height:280px;overflow:auto;z-index:20;padding:6px}
 .qr-item{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:var(--r-sm);background:none;border:0;cursor:pointer}
@@ -657,3 +657,15 @@ video.msg-media{max-height:360px}
   .reply-box{flex:1;min-width:0}
   .close-menu{position:fixed;left:12px;right:12px;top:112px;width:auto}
 }
+
+/* Шаблоны WhatsApp */
+.tpl-presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.tpl-preset{display:grid;gap:2px;text-align:left;padding:9px 12px;border:1px dashed var(--line-2);border-radius:var(--r-sm);background:var(--surface);cursor:pointer;font-family:inherit;font-size:13.5px;color:var(--ink)}
+.tpl-preset:hover{border-color:var(--pine);background:var(--pine-soft)}
+.tpl-preset span{font-size:12px;color:var(--muted)}
+.tpl-preview{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;font-size:13.5px;margin-bottom:14px;white-space:pre-line}
+.tpl-send{display:flex;flex-direction:column;gap:8px}
+.tpl-send .row{gap:8px;flex-wrap:wrap}
+.tpl-send .select{max-width:280px}
+.tpl-send .input{max-width:240px}
+.thread-f.win-closed>.row,.thread-f.win-closed>.tiny{display:none}
