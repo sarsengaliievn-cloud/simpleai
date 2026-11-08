@@ -15,3 +15,25 @@ describe('Понятная причина сбоя ИИ', () => {
   it('нет денег', () => expect(aiErrorReason('OpenAI 429 insufficient_quota')).toMatch(/закончились деньги/));
   it('неизвестное', () => expect(aiErrorReason('что-то странное')).toBe('Ассистент не смог подготовить ответ'));
 });
+
+import { dialogNote } from './ai/rag.js';
+import { buildSystemPrompt as build2 } from './ai/prompt.js';
+
+describe('не засыпать клиента', () => {
+  const cfg = { role: 'консультант', goals: [], tone: 'Дружелюбный', languages: ['ru'], forbidden: '', extraRules: '', advancedMode: false, advancedPrompt: '' };
+
+  it('после первого ответа — без приветствия и повторов', () => {
+    const note = dialogNote([{ role: 'user', content: 'Сәлем' }, { role: 'assistant', content: 'Сәлеметсіз бе!' }], 'Рассрочка бар ма');
+    expect(note).toContain('не здоровайся');
+    expect(dialogNote([], 'Привет')).toBe('');
+  });
+
+  it('серия сообщений — один ответ на все вопросы', () => {
+    expect(dialogNote([], '42 р керек\nКласикалык модель\nРассрочка бар ма')).toContain('одним коротким сообщением');
+  });
+
+  it('правило переписки есть и в продвинутом режиме', () => {
+    expect(build2(cfg, { name: 'Demo' })).toContain('только в первом ответе');
+    expect(build2({ ...cfg, advancedMode: true, advancedPrompt: 'Представься и дай каталог' }, { name: 'Demo' })).toContain('только в первом ответе');
+  });
+});

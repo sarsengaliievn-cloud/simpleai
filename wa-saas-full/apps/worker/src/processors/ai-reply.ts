@@ -160,11 +160,20 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     ...result.usage,
   }, conversationId);
 
+  // Пока модель думала, клиент дописал ещё — отвечать на старую часть не
+  // будем: задача нового сообщения ответит на всю серию разом. Иначе клиент
+  // получает два ответа подряд, и второй повторяет первый.
+  if (await newerInbound(db, conversationId, last.createdAt)) {
+    console.log(`[ai] ${conversationId}: клиент дописал — ответит задача нового сообщения`);
+    return;
+  }
+  const after = last.createdAt;
+
   // ── Пишет не покупатель ────────────────────
   // Маркетплейс, реклама, поставщик: короткое «передам руководству», сделку
   // убираем с доски продаж, диалог — людям.
   if (result.partner) {
-    const outcome = await sendAsAssistant(db, conversationId, partnerReply(result.partner.lang), { partner: true });
+    const outcome = await sendAsAssistant(db, conversationId, partnerReply(result.partner.lang), { partner: true }, after);
     if (outcome === 'sent' && last.providerMessageId && conversation.phoneNumber) {
       await markWhatsAppRead(db, { phoneNumberRowId: conversation.phoneNumber.id, providerMessageId: last.providerMessageId });
     }
@@ -179,7 +188,7 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
 
   // ── Клиент готов купить ────────────────────
   if (result.order) {
-    await handleOrder(db, { conversationId, result, lastProviderMessageId: last.providerMessageId, phoneNumberRowId: conversation.phoneNumber?.id ?? null });
+    await handleOrder(db, { conversationId, result, after, lastProviderMessageId: last.providerMessageId, phoneNumberRowId: conversation.phoneNumber?.id ?? null });
     return;
   }
 
@@ -211,7 +220,7 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     const outcome = await sendAsAssistant(db, conversationId, part, {
       ...(index === 0 ? meta : {}),
       ...(parts.length > 1 ? { part: index + 1, of: parts.length } : {}),
-    });
+    }, after);
     if (outcome !== 'sent') {
       // WhatsApp не принял — диалог человеку, с причиной и неотправленным остатком.
       if (typeof outcome === 'object') {
@@ -253,7 +262,7 @@ const ORDER_ASK_MS = 2 * 60 * 60 * 1000;
  */
 async function handleOrder(
   db: Db,
-  input: { conversationId: string; result: AnswerResult; lastProviderMessageId: string | null; phoneNumberRowId: string | null },
+  input: { conversationId: string; result: AnswerResult; after: Date; lastProviderMessageId: string | null; phoneNumberRowId: string | null },
 ) {
   const { conversationId, result } = input;
   const order = result.order!;
@@ -269,7 +278,7 @@ async function handleOrder(
       select: { id: true },
     });
     if (!asked) {
-      const outcome = await sendAsAssistant(db, conversationId, orderQuestion(order), { orderAsk: true, missing: order.missing });
+      const outcome = await sendAsAssistant(db, conversationId, orderQuestion(order), { orderAsk: true, missing: order.missing }, input.after);
       if (outcome === 'sent') {
         await markRead();
         console.log(`[ai] ${conversationId}: готов купить — уточняю ${order.missing.join(', ')}`);
@@ -279,7 +288,8 @@ async function handleOrder(
     }
   }
 
-  const outcome = await sendAsAssistant(db, conversationId, orderConfirmation(order.lang), { orderConfirm: true });
+  const outcome = await sendAsAssistant(db, conversationId, orderConfirmation(order.lang), { orderConfirm: true }, input.after);
+  if (outcome === 'skipped' && (await newerInbound(db, conversationId, input.after))) return;
   if (outcome === 'sent') await markRead();
 
   // В сделку — что выбрал клиент; сумму и товар менеджер поправит при оформлении.
@@ -367,7 +377,10 @@ async function sendAsAssistant(
   conversationId: string,
   text: string,
   metadata: Record<string, unknown>,
+  /** Ответ на сообщения до этого момента; клиент написал позже — не шлём. */
+  after?: Date,
 ): Promise<'sent' | 'skipped' | { reason: string; error: string }> {
+  if (after && (await newerInbound(db, conversationId, after))) return 'skipped';
   const conversation = await db.conversation.findFirst({
     where: { id: conversationId },
     include: { customer: true, phoneNumber: true },
@@ -406,6 +419,15 @@ async function sendAsAssistant(
   });
   await db.conversation.updateMany({ where: { id: conversationId }, data: { lastMessageAt: now } });
   return 'sent';
+}
+
+/** Клиент написал что-то после `after` — значит, на это ответит более свежая задача. */
+async function newerInbound(db: Db, conversationId: string, after: Date) {
+  const newer = await db.message.findFirst({
+    where: { conversationId, direction: 'INBOUND', createdAt: { gt: after } },
+    select: { id: true },
+  });
+  return !!newer;
 }
 
 /** Диалог — менеджеру, с понятной пометкой в ленте. Повторно не помечаем. */

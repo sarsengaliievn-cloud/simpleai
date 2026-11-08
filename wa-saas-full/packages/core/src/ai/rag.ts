@@ -189,7 +189,11 @@ export async function answerQuestion(params: {
   if (order && order.missing.length === 0) return orderResult();
 
   // ── 4. База знаний: ищем и по исходному тексту, и по переписанному ──
-  const texts = query !== params.question ? [query, params.question] : [params.question];
+  // Серия из нескольких сообщений («42 размер» / «классика» / «рассрочка
+  // есть?») — каждое ищем отдельно, иначе вопрос про рассрочку тонет в общем
+  // смысле и бот на него не отвечает.
+  const lines = params.question.split('\n').map((l) => l.trim()).filter((l) => l.length >= 3);
+  const texts = [...new Set([query, params.question, ...(lines.length > 1 ? lines.slice(-4) : [])])];
   const embedTokens = texts.reduce((sum, t) => sum + estimateTokens(t), 0);
   const embeddings = await ai.embed(texts);
   const found = new Map<string, SearchHit>();
@@ -200,7 +204,7 @@ export async function answerQuestion(params: {
       if (!prev || prev.score < h.score) found.set(h.chunkId, h);
     }
   }
-  const hits = [...found.values()].sort((a, b) => b.score - a.score).slice(0, 5);
+  const hits = [...found.values()].sort((a, b) => b.score - a.score).slice(0, texts.length > 2 ? 7 : 5);
   const relevant = hits.filter((h) => h.score >= MIN_RELEVANCE);
   const topScore = relevant[0]?.score ?? 0;
 
@@ -244,7 +248,7 @@ export async function answerQuestion(params: {
       ...history,
       {
         role: 'user',
-        content: `${context}\n\n---\n\nВопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}${
+        content: `${context}\n\n---\n\n${dialogNote(history, params.question)}Вопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}${
           order ? `\n(Клиент хочет купить. Если в базе есть ответ на это — ответь по нему; в конце спроси, чего не хватает для заказа: ${order.missing.map((f) => ({ model: 'модель', size: 'размер', city: 'город или самовывоз' })[f]).join(', ')}.)` : ''
         }`,
       },
@@ -282,6 +286,22 @@ export async function answerQuestion(params: {
     catalog: catalogInfo,
     photos,
   };
+}
+
+/**
+ * Подсказка модели о ходе диалога. Без неё каждый ответ звучит как первый:
+ * снова «Здравствуйте, я виртуальный консультант…», снова ссылка на каталог
+ * и «напишите имя и город» — клиент получает одно и то же по кругу.
+ */
+export function dialogNote(history: ChatMessage[], question: string) {
+  const notes: string[] = [];
+  if (history.some((m) => m.role === 'assistant')) {
+    notes.push('Ты уже отвечал этому клиенту: не здоровайся и не представляйся снова, не повторяй ссылки, условия и просьбы, которые уже были в твоих сообщениях выше.');
+  }
+  if (question.split('\n').filter((l) => l.trim()).length > 1) {
+    notes.push('Клиент прислал несколько сообщений подряд — ответь на все его вопросы одним коротким сообщением.');
+  }
+  return notes.length ? `(${notes.join(' ')})\n\n` : '';
 }
 
 /**

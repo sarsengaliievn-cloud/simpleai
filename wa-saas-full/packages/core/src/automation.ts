@@ -24,8 +24,9 @@ export function splitReply(text: string, maxChars = 350, maxParts = MAX_PARTS): 
   const limit = Math.max(80, maxChars);
   const paragraphs = clean.split(/\n[ \t]*\n+/).map((p) => p.trim()).filter(Boolean);
 
-  // Короткий ответ одним абзацем не трогаем вовсе.
-  if (paragraphs.length === 1 && clean.length <= limit) return [clean];
+  // Короткий ответ уходит одним сообщением, даже если модель разбила его на
+  // абзацы: два пузыря по одной фразе выглядят как спам, а не как менеджер.
+  if (clean.length <= limit) return [clean];
 
   const parts: string[] = [];
   for (const paragraph of paragraphs) {
