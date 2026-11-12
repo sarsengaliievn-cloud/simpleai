@@ -6,6 +6,7 @@ import { saveCompany, addQuickReply, deleteQuickReply } from './actions';
 import { timeAgo, agoText } from '@/lib/format';
 import { syncTemplates } from '@wa/core';
 import { TemplatesManager } from '@/components/TemplatesManager';
+import { SkladOrdersSettings } from '@/components/SkladOrdersSettings';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,8 @@ const ACTIONS: Record<string, string> = {
   'ai.catalog.updated': 'Изменён склад для ассистента',
   'team.member.added': 'Добавлен сотрудник',
   'team.member.removed': 'Удалён сотрудник',
+  'sklad.key.created': 'Создан ключ склада для заказов',
+  'sklad.key.removed': 'Отключён приём заказов со склада',
 };
 
 export default async function SettingsPage() {
@@ -29,11 +32,14 @@ export default async function SettingsPage() {
   const waiting = await db.messageTemplate.count({ where: { status: { in: ['PENDING', 'IN_APPEAL'] }, updatedAt: { lt: new Date(Date.now() - 60_000) } } });
   if (waiting) await syncTemplates(db).catch(() => 0);
 
-  const [logs, quick, templates] = await Promise.all([
+  const [logs, quick, templates, shopOrders, shopLinked] = await Promise.all([
     db.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 30 }),
     db.quickReply.findMany({ orderBy: { position: 'asc' } }),
     db.messageTemplate.findMany({ orderBy: { createdAt: 'asc' } }),
+    db.shopOrder.count(),
+    db.shopOrder.count({ where: { customerId: { not: null } } }),
   ]);
+  const site = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://app.saudabot.kz';
 
   return (
     <div className="shell">
@@ -74,6 +80,14 @@ export default async function SettingsPage() {
 
             <button className="btn btn-primary" type="submit">Сохранить</button>
           </form>
+
+          <SkladOrdersSettings
+            connected={!!company.orderHookHash}
+            lastAt={company.orderHookAt ? agoText(company.orderHookAt) : null}
+            orders={shopOrders}
+            linked={shopLinked}
+            endpoint={`${site.replace(/\/$/, '')}/api/webhooks/sklad`}
+          />
 
           <section className="card card-p" style={{ marginBottom: 16 }} id="quick">
             <div style={{ fontWeight: 700, marginBottom: 4 }}>Быстрые ответы</div>

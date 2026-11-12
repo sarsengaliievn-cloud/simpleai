@@ -85,6 +85,9 @@ const SMALLTALK_NOTE =
   'Ответь коротко и тепло на его языке: поздоровайся или ответь на благодарность и спроси, чем можешь помочь. ' +
   'Ничего не говори о товарах, ценах, наличии и доставке. Верни confidence 100 и needs_human = false.';
 
+/** Вопрос о своём заказе: «где моя посылка», «когда отправите», «тапсырысым қайда». */
+export const ORDER_STATUS_Q = /заказ|посылк|трек|отправ|доставк|придёт|придет|где мо[йяиё]|тапсырыс|сәлемдеме|посылка|жеткіз|жіберд|қашан кел|почт/i;
+
 export async function answerQuestion(params: {
   companyId: string;
   company: { name: string; description?: string | null; city?: string | null };
@@ -93,6 +96,8 @@ export async function answerQuestion(params: {
   history?: ChatMessage[];
   /** Каталог склада: наличие, размеры и цены берутся отсюда. */
   catalog?: CatalogSource | null;
+  /** Заказы клиента из склада (shopOrdersBlock) — для вопросов «где мой заказ». */
+  orders?: string | null;
 }): Promise<AnswerResult> {
   const choice = resolveAI(params.config);
   const ai = getAIFor(choice);
@@ -212,11 +217,15 @@ export async function answerQuestion(params: {
     ? [catalogBlock(catalog, match, params.catalog), storesLine(catalog)].filter(Boolean).join('\n\n')
     : '';
 
+  // Спрашивает про свой заказ — отвечаем по данным склада, без менеджера.
+  const ordersCtx = params.orders?.trim() && u?.intent !== 'buy' && ORDER_STATUS_Q.test(`${params.question}\n${query}`)
+    ? params.orders.trim() : '';
+
   // Хочет купить, а базе нечего сказать — уточняем модель, размер, город.
-  if (order && relevant.length === 0 && !stock) return orderResult({ input: 0, output: 0, embed: embedTokens });
+  if (order && relevant.length === 0 && !stock && !ordersCtx) return orderResult({ input: 0, output: 0, embed: embedTokens });
 
   // Ни базы, ни склада — до модели даже не идём: дешевле и честнее.
-  if (relevant.length === 0 && !stock) {
+  if (relevant.length === 0 && !stock && !ordersCtx) {
     return {
       answer: '',
       confidence: 0,
@@ -234,6 +243,9 @@ export async function answerQuestion(params: {
   // Склад — первым и главнее базы знаний: в базе может быть общее «смотрите
   // каталог», а клиент спрашивает про конкретную модель, которая есть в блоке.
   const context = [
+    ordersCtx
+      ? `${ordersCtx}\n\nНа вопросы клиента о его заказе (статус, отправка, трек) отвечай только по блоку ЗАКАЗЫ. Сроков доставки, которых там нет, не обещай. Есть трек — дай его и ссылку для отслеживания.`
+      : '',
     stock
       ? `${stock}\n\nНаличие, размеры и цены бери только из блока КАТАЛОГ — это данные склада на сейчас, они важнее базы знаний. Называя модель, добавь её ссылку из каталога. Точное количество пар не называй.`
       : '',
@@ -260,7 +272,7 @@ export async function answerQuestion(params: {
   // Модель склонна завышать уверенность в себе, поэтому итог ограничиваем
   // качеством найденных фрагментов: нет опоры в базе — нет высокой оценки.
   // Ответ по данным склада опирается на каталог, а не на базу знаний.
-  const confidence = stock ? parsed.confidence : Math.min(parsed.confidence, Math.round(topScore * 100));
+  const confidence = stock || ordersCtx ? parsed.confidence : Math.min(parsed.confidence, Math.round(topScore * 100));
 
   const photos = match?.mode === 'pick' && params.catalog?.photoUrl
     ? match.items.slice(0, 3).map((i) => ({

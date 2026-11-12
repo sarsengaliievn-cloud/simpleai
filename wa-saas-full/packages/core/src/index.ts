@@ -5,6 +5,7 @@ export * from './automation.js';
 export * from './crypto.js';
 export * from './whatsapp-send.js';
 export * from './crm.js';
+export * from './shop-orders.js';
 export * from './billing.js';
 export * from './ai/index.js';
 export * from './catalog.js';

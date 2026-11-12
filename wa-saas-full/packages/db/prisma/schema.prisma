@@ -104,6 +104,11 @@ model Company {
   autoAssign    Boolean  @default(false)
   /// Через сколько часов без движения клиент считается зависшим.
   staleHours    Int      @default(24)
+  /// Интеграция со складом: SHA-256 ключа, с которым склад присылает
+  /// интернет-заказы (сам ключ показывается владельцу один раз).
+  orderHookHash String?  @unique
+  /// Когда склад последний раз прислал заказ.
+  orderHookAt   DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -125,6 +130,7 @@ model Company {
   balanceTransactions BalanceTransaction[]
   topupRequests      TopupRequest[]
   quickReplies       QuickReply[]
+  shopOrders         ShopOrder[]
 
   @@map("companies")
 }
@@ -244,6 +250,7 @@ model Customer {
   company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   conversations Conversation[]
   deals         Deal[]
+  shopOrders    ShopOrder[]
 
   @@unique([companyId, waId])
   @@index([companyId, lastContactAt])
@@ -753,4 +760,48 @@ model MessageTemplate {
   @@unique([companyId, name, language])
   @@index([companyId, status])
   @@map("message_templates")
+}
+
+// ─────────────────────────────────────────────
+// Интернет-заказы из склада
+// ─────────────────────────────────────────────
+
+/// Заказ, оформленный в складе (интернет-заказы). Склад присылает его при
+/// создании и каждой смене статуса; по номеру телефона заказ привязывается
+/// к клиенту из WhatsApp, а сделка сама переходит на нужный этап.
+model ShopOrder {
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @db.Uuid
+  /// id заказа в складе
+  externalId  String
+  number      String?
+  /// Телефон как в складе и ключ сравнения — последние 10 цифр.
+  phone       String
+  phoneKey    String
+  clientName  String?
+  customerId  String?   @db.Uuid
+  dealId      String?   @db.Uuid
+  /// draft | paid | assembled | shipped | completed | returned | cancelled
+  status      String
+  /// [{ name, size, qty, sum }]
+  items       Json
+  total       Int       @default(0)
+  source      String?
+  sellerName  String?
+  city        String?
+  carrier     String?
+  track       String?
+  trackUrl    String?
+  orderedAt   DateTime
+  shippedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, externalId])
+  @@index([companyId, phoneKey])
+  @@index([companyId, customerId, orderedAt])
+  @@map("shop_orders")
 }

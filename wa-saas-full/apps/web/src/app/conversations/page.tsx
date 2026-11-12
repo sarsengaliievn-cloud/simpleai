@@ -1,3 +1,4 @@
+import { ShopOrdersCard } from '@/components/crm/ShopOrdersCard';
 import Link from 'next/link';
 import { can, lostReasonsOf } from '@wa/core';
 import { loadThread } from '@/lib/thread';
@@ -74,13 +75,18 @@ export default async function ConversationsPage({ searchParams }: Props) {
   const quickReplies = active ? await db.quickReply.findMany({ orderBy: { position: 'asc' }, select: { id: true, title: true, text: true } }) : [];
   const templates = active && !active.conversation.windowOpen ? await approvedTemplates(db, active.accountId) : [];
 
-  const [stages, deal, members] = active
+  const [stages, deal, members, shopOrders] = active
     ? await Promise.all([
         loadStages(db),
         loadDeal(db, { customerId: active.customerId }),
         can(ctx.role, 'team:manage') ? loadMembers(db) : Promise.resolve(null),
+        // Интернет-заказы клиента из склада — приходят сами, по номеру телефона
+        db.shopOrder.findMany({
+          where: { customerId: active.customerId }, orderBy: { orderedAt: 'desc' }, take: 5,
+          select: { id: true, number: true, status: true, total: true, items: true, carrier: true, track: true, trackUrl: true, sellerName: true, orderedAt: true },
+        }),
       ])
-    : [[], null, null];
+    : [[], null, null, []];
 
   return (
     <Shell
@@ -145,6 +151,7 @@ export default async function ConversationsPage({ searchParams }: Props) {
             ) : (
               <StartDeal conversationId={active.conversation.id} />
             )}
+            <ShopOrdersCard orders={shopOrders} />
           </aside>
         )}
       </div>

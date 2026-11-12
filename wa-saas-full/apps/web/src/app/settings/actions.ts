@@ -93,3 +93,26 @@ export async function syncTemplatesAction(): Promise<{ ok: boolean; error?: stri
   revalidatePath('/conversations');
   return { ok: true };
 }
+
+/* ── Склад: интернет-заказы ─────────────────────────────────── */
+
+/**
+ * Новый ключ, с которым склад присылает заказы. В базе — только SHA-256,
+ * сам ключ показывается один раз; старый перестаёт работать сразу.
+ */
+export async function createOrderHookAction(): Promise<{ ok: true; key: string } | { ok: false; error: string }> {
+  const { company, db } = await requireCompany('settings:manage');
+  const { randomBytes, createHash } = await import('node:crypto');
+  const key = `sb_${randomBytes(24).toString('base64url')}`;
+  await prisma.company.update({ where: { id: company.id }, data: { orderHookHash: createHash('sha256').update(key).digest('hex') } });
+  await db.auditLog.create({ data: { action: 'sklad.key.created', entityType: 'Company', entityId: company.id } as never });
+  revalidatePath('/settings');
+  return { ok: true, key };
+}
+
+export async function disableOrderHookAction() {
+  const { company, db } = await requireCompany('settings:manage');
+  await prisma.company.update({ where: { id: company.id }, data: { orderHookHash: null } });
+  await db.auditLog.create({ data: { action: 'sklad.key.removed', entityType: 'Company', entityId: company.id } as never });
+  revalidatePath('/settings');
+}

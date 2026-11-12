@@ -25,6 +25,7 @@ import {
   sendWhatsAppMedia,
   assertPublicUrl,
   type AnswerResult,
+  shopOrdersBlock,
 } from '@wa/core';
 import { getProvider } from '@wa/whatsapp';
 
@@ -148,7 +149,13 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
   const catalog = config.catalogUrl.trim()
     ? { url: config.catalogUrl.trim(), productUrl: config.catalogProductUrl.trim() || null, photoUrl: config.catalogPhotos ? config.catalogPhotoUrl.trim() || null : null }
     : null;
-  const result = await answerQuestion({ companyId, company, config, question, history, catalog });
+  // Заказы клиента из склада за 4 месяца — бот ответит на «где моя посылка»
+  const shopOrders = await db.shopOrder.findMany({
+    where: { customerId: conversation.customerId, orderedAt: { gte: new Date(Date.now() - 120 * 864e5) } },
+    orderBy: { orderedAt: 'desc' }, take: 3,
+  });
+  const orders = shopOrdersBlock(shopOrders);
+  const result = await answerQuestion({ companyId, company, config, question, history, catalog, orders });
   // ИИ снова отвечает — плашка «ИИ не работает» больше не нужна.
   if (config.lastErrorAt) {
     await db.aIConfiguration.updateMany({ data: { lastErrorAt: null, lastError: null } });
