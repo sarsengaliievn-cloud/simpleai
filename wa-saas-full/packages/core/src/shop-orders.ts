@@ -230,7 +230,8 @@ export function shopOrdersBlock(orders: OrderForAi[], now = new Date()): string 
     const status = SHOP_STATUS_NAME[o.status as ShopStatus] ?? o.status;
     return `- Заказ ${o.number ? `№${o.number}` : ''} от ${day(o.orderedAt)}: ${items || 'товары не указаны'} — ${formatMoney(o.total)}. Статус: ${status}` +
       (o.shippedAt ? `, отправлен ${day(o.shippedAt)}` : '') +
-      (o.carrier && o.track ? `, ${o.carrier}, трек ${o.track}` : o.track ? `, трек ${o.track}` : '') +
+      (o.carrier ? (/курьер/i.test(o.carrier) ? `, передан курьеру (трека нет — курьер свяжется сам)` : `, ${o.carrier}`) : '') +
+      (o.track ? `, трек ${o.track}` : o.carrier && !/курьер|автобус/i.test(o.carrier) && o.status === 'shipped' ? ', трек пока не указан' : '') +
       (o.trackUrl ? `, отследить: ${o.trackUrl}` : '');
   });
   return `ЗАКАЗЫ ЭТОГО КЛИЕНТА (из склада, на ${day(now)}):\n${lines.join('\n')}`;

@@ -33,8 +33,42 @@ export async function GET(request: Request) {
   const company = await companyByKey(request);
   if (!company) return Response.json({ ok: false, error: 'Неверный ключ' }, { status: 401 });
   const db = forCompany(prisma, company.id);
+  const url = new URL(request.url);
+  // ?what=unanswered&minutes=15 — клиенты, которым никто не ответил: склад
+  // ставит по ним задачу управляющему с номерами
+  if (url.searchParams.get('what') === 'unanswered') {
+    const minutes = Math.min(720, Math.max(5, Number(url.searchParams.get('minutes')) || 15));
+    return Response.json({ ok: true, minutes, unanswered: await unanswered(db, minutes) });
+  }
   const [orders, linked] = await Promise.all([db.shopOrder.count(), db.shopOrder.count({ where: { customerId: { not: null } } })]);
   return Response.json({ ok: true, company: company.name, orders, linked });
+}
+
+/**
+ * Диалоги, где последнее слово за клиентом дольше N минут (за сутки).
+ * Неважно, кто должен был ответить — бот или менеджер: клиент ждёт.
+ */
+async function unanswered(db: ReturnType<typeof forCompany>, minutes: number) {
+  const now = Date.now();
+  const convs = await db.conversation.findMany({
+    where: { status: 'OPEN', lastMessageAt: { lte: new Date(now - minutes * 60_000), gte: new Date(now - 24 * 3_600_000) } },
+    orderBy: { lastMessageAt: 'asc' },
+    take: 60,
+    include: { customer: true, assignee: true, messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
+  });
+  const site = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://app.saudabot.kz').replace(/\/$/, '');
+  return convs
+    .filter((c) => c.messages[0]?.direction === 'INBOUND')
+    .map((c) => ({
+      conversationId: c.id,
+      phone: c.customer.waId,
+      name: c.customer.name ?? '',
+      minutes: Math.floor((now - c.lastMessageAt.getTime()) / 60_000),
+      assignee: c.assignee ? c.assignee.firstName : '',
+      mode: c.mode,
+      last: (c.messages[0]?.text ?? '').slice(0, 120),
+      url: `${site}/conversations?id=${c.id}`,
+    }));
 }
 
 export async function POST(request: Request) {
