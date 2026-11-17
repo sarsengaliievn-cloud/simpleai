@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { prisma } from '@wa/db';
 import { requireCompany } from '@/lib/session';
-import { createTemplate, deleteTemplate, syncTemplates, TemplateError } from '@wa/core';
+import { createTemplate, deleteTemplate, syncTemplates, TemplateError, SHOP_STATUSES } from '@wa/core';
 
 export async function saveCompany(formData: FormData) {
   const { company, db } = await requireCompany('settings:manage');
@@ -114,5 +114,19 @@ export async function disableOrderHookAction() {
   const { company, db } = await requireCompany('settings:manage');
   await prisma.company.update({ where: { id: company.id }, data: { orderHookHash: null } });
   await db.auditLog.create({ data: { action: 'sklad.key.removed', entityType: 'Company', entityId: company.id } as never });
+  revalidatePath('/settings');
+}
+
+/** Какой статус заказа на какой этап воронки ведёт. */
+export async function saveOrderStageMapAction(formData: FormData) {
+  const { company, db } = await requireCompany('settings:manage');
+  const ids = new Set((await db.pipelineStage.findMany({ select: { id: true } })).map((s) => s.id));
+  const map: Record<string, string> = {};
+  for (const status of SHOP_STATUSES) {
+    const v = String(formData.get(`st_${status}`) ?? '');
+    if (v === 'none' || ids.has(v)) map[status] = v;
+  }
+  await prisma.company.update({ where: { id: company.id }, data: { orderStageMap: map } });
+  await db.auditLog.create({ data: { action: 'sklad.stages.updated', entityType: 'Company', entityId: company.id } as never });
   revalidatePath('/settings');
 }

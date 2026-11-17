@@ -109,6 +109,8 @@ model Company {
   orderHookHash String?  @unique
   /// Когда склад последний раз прислал заказ.
   orderHookAt   DateTime?
+  /// Статус заказа склада → id этапа воронки ('none' — не менять).
+  orderStageMap Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { phoneKey, parseShopOrder, stageKindForStatus, itemsText, shopOrdersBlock, applyShopOrder, type ShopOrderInput } from './shop-orders.js';
+import { phoneKey, parseShopOrder, stageKindForStatus, itemsText, shopOrdersBlock, applyShopOrder, guessStageMap, resolveStageMap, type ShopOrderInput } from './shop-orders.js';
 import { ORDER_STATUS_Q } from './ai/rag.js';
 
 describe('заказы из склада: разбор', () => {
@@ -46,12 +46,12 @@ describe('заказы из склада: разбор', () => {
 });
 
 /* ── Привязка и сделка: база в памяти ── */
-function fakeDb() {
+function fakeDb(stages?: Record<string, unknown>[]) {
   const t: Record<string, Record<string, unknown>[]> = {
     shopOrder: [], customer: [{ id: 'c1', waId: '77011234567', name: null, lastContactAt: new Date() }],
     conversation: [{ id: 'v1', customerId: 'c1', lastMessageAt: new Date() }],
     deal: [], dealEvent: [],
-    pipelineStage: [
+    pipelineStage: stages ?? [
       { id: 's-new', name: 'Новый', kind: 'NEW', position: 0 }, { id: 's-work', name: 'В работе', kind: 'WORK', position: 1 },
       { id: 's-order', name: 'Заказ', kind: 'ORDER', position: 2 }, { id: 's-won', name: 'Выдан', kind: 'WON', position: 3 },
       { id: 's-lost', name: 'Отказ', kind: 'LOST', position: 4 },
@@ -143,5 +143,55 @@ describe('ссылка на трек', () => {
     const base = { id: 'x1', phone: '+7 701 111 22 33', status: 'shipped', items: [] };
     expect((parseShopOrder({ ...base, trackUrl: 'javascript:alert(1)' }) as { trackUrl: string | null }).trackUrl).toBeNull();
     expect((parseShopOrder({ ...base, trackUrl: 'https://qazpost.kz/t/AB1' }) as { trackUrl: string | null }).trackUrl).toBe('https://qazpost.kz/t/AB1');
+  });
+});
+
+/* Воронка как у SHOQAI: своих этапов много, типа «Заказ» может не быть. */
+const SHOQAI = [
+  ['s1', 'Новый', 'NEW'], ['s2', 'Уточнял график работы', 'WORK'], ['s3', 'У менеджера', 'WORK'], ['s4', 'отправлен каталог', 'WORK'],
+  ['s5', 'Думает', 'WORK'], ['s6', 'Ждем оплату', 'WORK'], ['s7', 'Продажа', 'WORK'], ['s8', 'Выкупил', 'WON'],
+  ['s9', 'Придет в магазин', 'WORK'], ['s10', 'Нету ответа отказ', 'LOST'],
+].map(([id, name, kind], position) => ({ id, name, kind, position }));
+
+describe('этапы под свою воронку', () => {
+  it('угадывает этапы по названиям', () => {
+    const m = guessStageMap(SHOQAI as never);
+    expect(m.draft).toBe('s6');
+    expect(m.paid).toBe('s7');
+    expect(m.completed).toBe('s8');
+    expect(m.cancelled).toBe('s10');
+  });
+  it('сохранённое важнее догадки, «none» — не менять, удалённый этап — догадка', () => {
+    const m = resolveStageMap(SHOQAI as never, { paid: 's9', draft: 'none', completed: 'deleted' });
+    expect(m.paid).toBe('s9');
+    expect(m.draft).toBeNull();
+    expect(m.completed).toBe('s8');
+  });
+  it('без этапа типа «Заказ» сделка всё равно идёт: ждём оплату → продажа → выкупил', async () => {
+    const { db, t } = fakeDb(SHOQAI);
+    t.deal!.push({ id: 'd1', customerId: 'c1', stageId: 's5', archivedAt: null, amount: null, product: null, stageChangedAt: new Date() });
+    await applyShopOrder(db, order({ status: 'draft' }));
+    expect(t.deal![0]!.stageId).toBe('s6');
+    await applyShopOrder(db, order({ status: 'paid' }));
+    expect(t.deal![0]!.stageId).toBe('s7');
+    await applyShopOrder(db, order({ status: 'completed' }));
+    expect(t.deal![0]!.stageId).toBe('s8');
+  });
+  it('повтор без изменений догоняет сделку, но историю не засоряет', async () => {
+    const { db, t } = fakeDb(SHOQAI);
+    t.deal!.push({ id: 'd1', customerId: 'c1', stageId: 's5', archivedAt: null, amount: null, product: null, stageChangedAt: new Date() });
+    await applyShopOrder(db, order({ status: 'paid' }), { paid: 'none' });
+    expect(t.deal![0]!.stageId).toBe('s5');
+    const notes = () => t.dealEvent!.filter((e) => e.type === 'note').length;
+    const before = notes();
+    await applyShopOrder(db, order({ status: 'paid' }));
+    expect(t.deal![0]!.stageId).toBe('s7');
+    expect(notes()).toBe(before);
+  });
+  it('назад не двигает', async () => {
+    const { db, t } = fakeDb(SHOQAI);
+    t.deal!.push({ id: 'd1', customerId: 'c1', stageId: 's7', archivedAt: null, amount: null, product: null, stageChangedAt: new Date() });
+    await applyShopOrder(db, order({ status: 'draft' }));
+    expect(t.deal![0]!.stageId).toBe('s7');
   });
 });

@@ -110,13 +110,60 @@ export function itemsText(items: ShopItem[], max = 300) {
 
 const orderLabel = (o: { number: string | null; id: string }) => (o.number ? `№${o.number}` : `из склада`);
 
+/** Статусы склада так, как их видят люди в складе. */
+export const SHOP_STATUS_LABEL: Record<ShopStatus, string> = {
+  draft: 'Новый (ждём оплату)', paid: 'Оплачен', assembled: 'Собран', shipped: 'Отправлен',
+  completed: 'Выкуплен', cancelled: 'Отменён', returned: 'Возврат',
+};
+
+/**
+ * Какой статус заказа на какой этап воронки ведёт: id этапа или 'none' —
+ * «не менять этап». Чего нет в сохранённом — угадываем по названиям этапов.
+ */
+export type StageMap = Partial<Record<ShopStatus, string>>;
+type StageLite = { id: string; name: string; kind: string; position: number };
+
+const norm = (s: string) => s.toLowerCase().replace(/ё/g, 'е');
+
+/**
+ * Этапы у всех свои: «Ждем оплату», «Продажа», «Выкупил». Сначала ищем по
+ * названию, потом по типу этапа. Раньше брали только тип «Заказ» — у кого
+ * такого этапа не было, сделка из склада не двигалась вовсе.
+ */
+export function guessStageMap(stages: StageLite[]): Record<ShopStatus, string | null> {
+  const by = (list: StageLite[], re: RegExp) => list.find((s) => re.test(norm(s.name)))?.id ?? null;
+  const won = stages.filter((s) => s.kind === 'WON');
+  const lost = stages.filter((s) => s.kind === 'LOST');
+  const completed = by(won, /выкуп|выдан|получ|забрал|купил/) ?? won.at(-1)?.id ?? null;
+  const open = stages.filter((s) => s.kind !== 'NEW' && s.kind !== 'LOST' && s.id !== completed);
+  const orderKind = stages.find((s) => s.kind === 'ORDER')?.id ?? null;
+  const draft = by(open.filter((s) => s.kind !== 'WON'), /ждем оплат|ожида\S* оплат|оплат/) ?? orderKind;
+  const paid = by(open, /продаж|оплачен|оформлен|заказ/) ?? orderKind ?? draft;
+  const shipped = by(open, /отправ|доставк|в пути|посылк/) ?? paid;
+  const cancelled = by(lost, /отмен/) ?? lost[0]?.id ?? null;
+  const returned = by(lost, /возврат/) ?? cancelled;
+  return { draft, paid, assembled: paid, shipped, completed, cancelled, returned };
+}
+
+/** Сохранённые настройки поверх догадки; удалённые этапы не мешают. */
+export function resolveStageMap(stages: StageLite[], saved?: unknown): Record<ShopStatus, string | null> {
+  const guess = guessStageMap(stages);
+  const map = (saved && typeof saved === 'object' ? saved : {}) as Record<string, unknown>;
+  const ids = new Set(stages.map((s) => s.id));
+  return Object.fromEntries(SHOP_STATUSES.map((st) => {
+    const v = map[st];
+    return [st, v === 'none' ? null : typeof v === 'string' && ids.has(v) ? v : guess[st]];
+  })) as Record<ShopStatus, string | null>;
+}
+
 export type ApplyResult = { id: string; linked: boolean; customerId?: string; dealId?: string; stage?: string; note?: string };
 
 /**
- * Сохранить заказ и двинуть сделку клиента. Повторная отправка того же
- * заказа без изменений ничего не делает — склад может слать сколько угодно.
+ * Сохранить заказ и двинуть сделку клиента на этап, выбранный для его
+ * статуса (stageMap из настроек компании). Повторная отправка того же
+ * заказа историю не засоряет — склад может слать сколько угодно.
  */
-export async function applyShopOrder(db: TenantClient, input: ShopOrderInput): Promise<ApplyResult> {
+export async function applyShopOrder(db: TenantClient, input: ShopOrderInput, stageMap?: unknown): Promise<ApplyResult> {
   const key = phoneKey(input.phone);
   const existing = await db.shopOrder.findFirst({ where: { externalId: input.id } });
   // Клиент WhatsApp с тем же номером; если таких несколько — кто писал последним.
@@ -145,8 +192,9 @@ export async function applyShopOrder(db: TenantClient, input: ShopOrderInput): P
     await db.customer.updateMany({ where: { id: customer.id }, data: { name: input.clientName } });
   }
 
+  // Повтор без изменений этап всё равно сверяет: так «Отправить за 30 дней»
+  // догоняет сделки, которые раньше не сдвинулись. В историю — только новое.
   const statusChanged = !existing || existing.status !== input.status || existing.total !== input.total;
-  if (!statusChanged && existing?.dealId) return { id: input.id, linked: true, customerId: customer.id, dealId: existing.dealId };
 
   // Сделка: та, что уже связана с заказом, иначе открытая у клиента,
   // иначе новая — клиент мог купить через неделю после закрытой сделки.
@@ -159,12 +207,14 @@ export async function applyShopOrder(db: TenantClient, input: ShopOrderInput): P
       orderBy: { createdAt: 'desc' }, include: { stage: true },
     });
   }
-  const target = stageKindForStatus(input.status);
   const stages = await ensureStages(db);
+  const targetId = resolveStageMap(stages, stageMap)[input.status];
+  const stage = targetId ? stages.find((s) => s.id === targetId) : undefined;
+  const target = stage?.kind as StageKind | undefined;
   if (!deal) {
     // Отменённый заказ без сделки — заводить отказ не из чего.
-    if (target === 'LOST') {
-      return { id: input.id, linked: true, customerId: customer.id, note: 'отменён до сделки' };
+    if (!stage || target === 'LOST') {
+      return { id: input.id, linked: true, customerId: customer.id, note: stage ? 'отменён до сделки' : 'этап для статуса не выбран' };
     }
     const conv = await db.conversation.findFirst({ where: { customerId: customer.id }, orderBy: { lastMessageAt: 'desc' }, select: { id: true } });
     const first = stages.find((s) => s.kind === 'NEW') ?? stages[0]!;
@@ -175,19 +225,22 @@ export async function applyShopOrder(db: TenantClient, input: ShopOrderInput): P
     deal = await db.deal.findFirst({ where: { id: created.id }, include: { stage: true } });
   }
   if (!deal) return { id: input.id, linked: true, customerId: customer.id };
-  await db.shopOrder.updateMany({ where: { id: orderId }, data: { dealId: deal.id } });
+  if (existing?.dealId !== deal.id) await db.shopOrder.updateMany({ where: { id: orderId }, data: { dealId: deal.id } });
 
-  const current = deal.stage.kind as StageKind;
-  const stage = stages.find((s) => s.kind === target);
+  const current = deal.stage;
+  const currentKind = current.kind as StageKind;
   const product = itemsText(input.items) || 'Товар';
   const label = orderLabel(input);
   let note: string | undefined;
 
-  // Назад не двигаем: выданную сделку не возвращаем в «заказ»; возврат
-  // после выдачи — запись в истории, отказом сделка не становится.
-  const skip = !stage || current === target
-    || (current === 'WON' && target !== 'WON')
-    || (current === 'LOST' && target === 'LOST');
+  // Только вперёд по воронке. Выкупленную сделку не трогаем (возврат после
+  // выкупа — запись в истории); из отказа новый заказ возвращает в работу.
+  let skip = !stage || stage.id === current.id;
+  if (!skip && stage) {
+    if (currentKind === 'WON') skip = target !== 'WON' || stage.position < current.position;
+    else if (currentKind === 'LOST') skip = target === 'LOST';
+    else if (target !== 'LOST' && target !== 'WON') skip = stage.position < current.position;
+  }
   if (!skip && stage) {
     try {
       await moveDeal(db, {
@@ -198,7 +251,7 @@ export async function applyShopOrder(db: TenantClient, input: ShopOrderInput): P
       if (!(e instanceof CrmError)) throw e;
       note = e.message;
     }
-  } else if (target === 'ORDER' && current === 'ORDER' && input.total && input.total !== deal.amount) {
+  } else if (currentKind !== 'WON' && currentKind !== 'LOST' && input.total && input.total !== deal.amount) {
     await db.deal.updateMany({ where: { id: deal.id }, data: { amount: input.total, product } });
   }
   if (statusChanged) {

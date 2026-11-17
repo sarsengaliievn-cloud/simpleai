@@ -23,7 +23,7 @@ async function companyByKey(request: Request) {
   const key = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
   if (key.length < 20 || key.length > 200) return null;
   const hash = createHash('sha256').update(key).digest('hex');
-  const company = await prisma.company.findFirst({ where: { orderHookHash: hash }, select: { id: true, name: true, orderHookHash: true } });
+  const company = await prisma.company.findFirst({ where: { orderHookHash: hash }, select: { id: true, name: true, orderHookHash: true, orderStageMap: true } });
   // Сравнение без утечки по времени — на случай, если индекс вернёт что-то похожее.
   if (!company?.orderHookHash || !timingSafeEqual(Buffer.from(company.orderHookHash), Buffer.from(hash))) return null;
   return company;
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
     const parsed = parseShopOrder(item);
     if (typeof parsed === 'string') { errors.push(parsed); continue; }
     try {
-      results.push(await applyShopOrder(db, parsed));
+      results.push(await applyShopOrder(db, parsed, company.orderStageMap));
     } catch (e) {
       console.error('[sklad] заказ', parsed.id, e);
       errors.push(`заказ ${parsed.number ?? parsed.id}: ${(e as Error).message.slice(0, 160)}`);

@@ -1,15 +1,23 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { createOrderHookAction, disableOrderHookAction } from '@/app/settings/actions';
+import { createOrderHookAction, disableOrderHookAction, saveOrderStageMapAction } from '@/app/settings/actions';
+
+/** Статусы заказа в складе (как в @wa/core SHOP_STATUS_LABEL; клиентский компонент сервер не тянет). */
+const STATUSES: Array<[string, string]> = [
+  ['draft', 'Новый (ждём оплату)'], ['paid', 'Оплачен'], ['assembled', 'Собран'], ['shipped', 'Отправлен'],
+  ['completed', 'Выкуплен'], ['cancelled', 'Отменён'], ['returned', 'Возврат'],
+];
 
 /**
  * Связь со складом: склад присылает интернет-заказы, они привязываются
  * к клиентам WhatsApp по номеру, сделки двигаются сами.
  */
-export function SkladOrdersSettings({ connected, lastAt, orders, linked, endpoint }: {
+export function SkladOrdersSettings({ connected, lastAt, orders, linked, endpoint, stages, stageMap }: {
   connected: boolean; lastAt: string | null; orders: number; linked: number; endpoint: string;
+  stages: { id: string; name: string }[]; stageMap: Record<string, string | null>;
 }) {
+  const [saved, setSaved] = useState(false);
   const [key, setKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -64,6 +72,33 @@ export function SkladOrdersSettings({ connected, lastAt, orders, linked, endpoin
         )}
       </div>
       {connected && !key && <p className="tiny muted" style={{ marginTop: 8 }}>Новый ключ сразу отключает старый — его придётся заменить и в складе.</p>}
+
+      {connected && (
+        <form
+          action={(fd) => start(async () => { setSaved(false); await saveOrderStageMapAction(fd); setSaved(true); })}
+          style={{ marginTop: 18, borderTop: '1px solid var(--line)', paddingTop: 14 }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Куда двигать сделку</div>
+          <p className="small muted" style={{ marginBottom: 12, maxWidth: '68ch' }}>
+            Меняется статус заказа в складе — сделка клиента сама переходит на выбранный этап. Только вперёд: назад и из «Купил» не возвращаем.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(140px, max-content) minmax(0, 260px)', gap: '8px 12px', alignItems: 'center' }}>
+            {STATUSES.map(([st, label]) => (
+              <label key={st} style={{ display: 'contents' }}>
+                <span className="small">{label}</span>
+                <select className="input" name={`st_${st}`} defaultValue={stageMap[st] ?? 'none'} onChange={() => setSaved(false)}>
+                  <option value="none">— не менять этап —</option>
+                  {stages.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </label>
+            ))}
+          </div>
+          <div className="row" style={{ gap: 8, marginTop: 12, alignItems: 'center' }}>
+            <button type="submit" className="btn btn-primary btn-sm" disabled={pending}>{pending ? 'Сохраняю…' : 'Сохранить этапы'}</button>
+            {saved && <span className="small muted">Сохранено. Чтобы подтянуть старые заказы — в складе нажмите «Отправить заказы за 30 дней».</span>}
+          </div>
+        </form>
+      )}
     </section>
   );
 }
