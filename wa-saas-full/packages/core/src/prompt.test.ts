@@ -47,3 +47,14 @@ describe('снятые модели Google', () => {
     expect(resolveAI({ aiProvider: 'openai', aiModel: 'gpt-5-mini' }).model).toBe('gpt-5-mini');
   });
 });
+
+import { isSmallTalk } from './ai/rag.js';
+describe('приветствие + вопрос', () => {
+  it('приветствие узнаётся отдельно, вопрос — нет', () => {
+    expect(isSmallTalk('Қайырлы кеш')).toBe(true);
+    expect(isSmallTalk('Астанаға доставка барма')).toBe(false);
+  });
+  it('язык клиента — явно', () => {
+    expect(dialogNote([], 'Астанаға доставка барма', 'kk')).toContain('по-казахски');
+  });
+});

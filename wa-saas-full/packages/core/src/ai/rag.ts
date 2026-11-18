@@ -197,8 +197,12 @@ export async function answerQuestion(params: {
   // Серия из нескольких сообщений («42 размер» / «классика» / «рассрочка
   // есть?») — каждое ищем отдельно, иначе вопрос про рассрочку тонет в общем
   // смысле и бот на него не отвечает.
-  const lines = params.question.split('\n').map((l) => l.trim()).filter((l) => l.length >= 3);
-  const texts = [...new Set([query, params.question, ...(lines.length > 1 ? lines.slice(-4) : [])])];
+  // Приветствия («Қайырлы кеш», «Здравствуйте») в поиск не берём: иначе
+  // находится заметка, которая тоже начинается с «Саламатсыз ба!», и бот
+  // отвечает ценой вместо ответа на вопрос о доставке.
+  const lines = params.question.split('\n').map((l) => l.trim()).filter((l) => l.length >= 3 && !isSmallTalk(l));
+  const asked = lines.join('\n') || params.question;
+  const texts = [...new Set([query, asked, ...(lines.length > 1 ? lines.slice(-4) : [])])];
   const embedTokens = texts.reduce((sum, t) => sum + estimateTokens(t), 0);
   const embeddings = await ai.embed(texts);
   const found = new Map<string, SearchHit>();
@@ -260,7 +264,7 @@ export async function answerQuestion(params: {
       ...history,
       {
         role: 'user',
-        content: `${context}\n\n---\n\n${dialogNote(history, params.question)}Вопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}${
+        content: `${context}\n\n---\n\n${dialogNote(history, params.question, u?.lang)}Вопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}${
           order ? `\n(Клиент хочет купить. Если в базе есть ответ на это — ответь по нему; в конце спроси, чего не хватает для заказа: ${order.missing.map((f) => ({ model: 'модель', size: 'размер', city: 'город или самовывоз' })[f]).join(', ')}.)` : ''
         }`,
       },
@@ -305,8 +309,12 @@ export async function answerQuestion(params: {
  * снова «Здравствуйте, я виртуальный консультант…», снова ссылка на каталог
  * и «напишите имя и город» — клиент получает одно и то же по кругу.
  */
-export function dialogNote(history: ChatMessage[], question: string) {
+export function dialogNote(history: ChatMessage[], question: string, lang?: 'ru' | 'kk') {
   const notes: string[] = [];
+  // Инструкция владельца часто написана по-русски, и модель отвечает
+  // по-русски даже на казахский вопрос. Язык клиента — явно.
+  if (lang === 'kk') notes.push('Клиент пишет по-казахски — ответь по-казахски.');
+  else if (lang === 'ru') notes.push('Клиент пишет по-русски — ответь по-русски.');
   if (history.some((m) => m.role === 'assistant')) {
     notes.push('Ты уже отвечал этому клиенту: не здоровайся и не представляйся снова, не повторяй ссылки, условия и просьбы, которые уже были в твоих сообщениях выше.');
   }
