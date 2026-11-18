@@ -685,7 +685,7 @@ video.msg-media{max-height:360px}
   .an-period .seg{max-width:100%;overflow-x:auto;scrollbar-width:none}
   .an-period .seg a{white-space:nowrap}
 }
-@media (max-width:520px){.an-dates{flex:1 1 100%}.an-dates .input{flex:1 1 0;min-width:0;padding:5px 6px}.an-dates .btn{flex:none}}
+@media (max-width:520px){.an-dates{flex:1 1 100%;min-width:0}.an-dates .input{flex:1 1 0;min-width:0;padding:5px 6px}.an-dates .btn{flex:none}}
 
 /* База знаний: действия с документом */
 .kb-acts{display:flex;gap:2px;justify-content:flex-end;flex-wrap:wrap}
@@ -704,3 +704,10 @@ video.msg-media{max-height:360px}
   .stage-edit-list li:has(.stage-hint){grid-template-areas:"dot name tools" ". kind kind" ". hint hint"}
   .stage-hint{grid-area:hint;padding-left:0;flex-direction:column;align-items:stretch;gap:3px}
 }
+
+/* Сделки: отбор по дню, когда пришёл клиент */
+.deal-dates{display:inline-flex;gap:6px;align-items:center}
+.deal-filters .deal-dates .input{height:34px;width:auto;max-width:150px;padding:4px 8px;font-size:13px}
+.deal-dates.on .input{border-color:var(--pine)}
+.deal-period-note{align-self:center}
+@media (max-width:520px){.deal-dates{flex:1 1 100%;min-width:0}.deal-filters .deal-dates .input{flex:1 1 0;min-width:0;max-width:none}.deal-dates .btn{flex:none}}

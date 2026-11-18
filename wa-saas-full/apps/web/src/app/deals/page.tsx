@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { can, isStale, lostReasonsOf, onShiftNow, defaultStageHint, skladStageIds, type StageKind } from '@wa/core';
+import { can, isStale, lostReasonsOf, onShiftNow, defaultStageHint, skladStageIds, resolvePeriod, type StageKind } from '@wa/core';
 import { requireCompany } from '@/lib/session';
 import { Shell } from '@/components/Shell';
 import { Kanban, type KanbanCard } from '@/components/crm/Kanban';
@@ -18,10 +18,10 @@ export const dynamic = 'force-dynamic';
 /** Закрытые сделки (выдан, отказ) на доске — только свежие, иначе колонки распухают. */
 const CLOSED_DAYS = 30;
 
-type Props = { searchParams: Promise<{ id?: string; m?: string; q?: string; f?: string; stages?: string; tab?: string }> };
+type Props = { searchParams: Promise<{ id?: string; m?: string; q?: string; f?: string; stages?: string; tab?: string; d?: string; from?: string; to?: string }> };
 
 export default async function DealsPage({ searchParams }: Props) {
-  const { id, m = '', q = '', f: rawFilter = '', stages: editStages, tab } = await searchParams;
+  const { id, m = '', q = '', f: rawFilter = '', stages: editStages, tab, d: rawDay, from: rawFrom, to: rawTo } = await searchParams;
   const filter = rawFilter === 'stale' || rawFilter === 'remind' ? rawFilter : '';
   const ctx = await requireCompany();
   const { db, ownDeals, seesOnlyOwn, role, company } = ctx;
@@ -33,6 +33,12 @@ export default async function DealsPage({ searchParams }: Props) {
   const digits = query.replace(/\D/g, '');
   const closedSince = new Date(Date.now() - CLOSED_DAYS * 24 * 60 * 60 * 1000);
 
+  // Когда клиент пришёл (сделка заведена): сегодня, вчера, 7 дней или свои даты.
+  // С датой на доске видны и закрытые сделки этих дней — иначе не понять, чем кончилось.
+  const dated = ['today', 'yesterday', '7'].includes(rawDay ?? '') || !!rawFrom;
+  const period = dated ? resolvePeriod({ d: rawDay, from: rawFrom, to: rawTo }, company.timezone || 'Asia/Almaty') : null;
+  const dateParams: Record<string, string> = !period ? {} : period.id === 'custom' ? { from: period.fromKey, to: period.toKey } : { d: period.id };
+
   const [stages, members] = await Promise.all([loadStages(db), canAssign ? loadMembers(db) : Promise.resolve(null)]);
 
   const deals = await db.deal.findMany({
@@ -41,10 +47,9 @@ export default async function DealsPage({ searchParams }: Props) {
       // «Просто вопрос» и спам — не продажи, доску не засоряют.
       archivedAt: null,
       ...(m === 'none' ? { assigneeId: null } : m && !seesOnlyOwn ? { assigneeId: m } : {}),
-      OR: [
-        { stage: { kind: { notIn: ['WON', 'LOST'] } } },
-        { stageChangedAt: { gte: closedSince } },
-      ],
+      ...(period
+        ? { createdAt: { gte: period.from, lt: period.to } }
+        : { OR: [{ stage: { kind: { notIn: ['WON', 'LOST'] } } }, { stageChangedAt: { gte: closedSince } }] }),
       ...(query
         ? {
             customer: {
@@ -127,7 +132,7 @@ export default async function DealsPage({ searchParams }: Props) {
   const quickReplies = thread ? await db.quickReply.findMany({ orderBy: { position: 'asc' }, select: { id: true, title: true, text: true } }) : [];
   const templates = thread && !thread.conversation.windowOpen ? await approvedTemplates(db, thread.accountId) : [];
   const params = (extra: Record<string, string>) => {
-    const sp = new URLSearchParams({ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...(filter ? { f: filter } : {}), ...extra });
+    const sp = new URLSearchParams({ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...(filter ? { f: filter } : {}), ...dateParams, ...extra });
     return `/deals${sp.size ? `?${sp}` : ''}`;
   };
 
@@ -168,7 +173,10 @@ export default async function DealsPage({ searchParams }: Props) {
           />
         )}
 
-        <DealFilters members={members} manager={m} query={query} filter={filter} staleCount={staleCount} remindCount={remindCount} staleHours={company.staleHours} />
+        <DealFilters
+          members={members} manager={m} query={query} filter={filter} staleCount={staleCount} remindCount={remindCount} staleHours={company.staleHours}
+          period={period ? { id: period.id, from: period.fromKey, to: period.toKey, label: period.label, count: deals.length } : null}
+        />
         {onShift && (
           <p className="tiny muted" style={{ margin: '-4px 0 10px' }}>
             {onShift.length ? `На смене: ${onShift.join(', ')} — новые клиенты уходят им по очереди` : 'На смене никого — новые клиенты ждут без менеджера'}
@@ -185,7 +193,7 @@ export default async function DealsPage({ searchParams }: Props) {
             </p>
           </div>
         ) : (
-          <Kanban stages={stages} cards={cards} lostReasons={lostReasons} linkParams={{ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...(filter ? { f: filter } : {}) }} />
+          <Kanban stages={stages} cards={cards} lostReasons={lostReasons} linkParams={{ ...(m ? { m } : {}), ...(query ? { q: query } : {}), ...(filter ? { f: filter } : {}), ...dateParams }} />
         )}
       </div>
 
