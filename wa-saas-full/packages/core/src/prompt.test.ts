@@ -37,3 +37,13 @@ describe('не засыпать клиента', () => {
     expect(build2({ ...cfg, advancedMode: true, advancedPrompt: 'Представься и дай каталог' }, { name: 'Demo' })).toContain('только в первом ответе');
   });
 });
+
+import { resolveAI, currentModel } from './ai/factory.js';
+describe('снятые модели Google', () => {
+  it('Gemini 2.5 Flash заменяется на актуальную', () => {
+    expect(currentModel('gemini-2.5-flash')).toBe('gemini-3.6-flash');
+    expect(resolveAI({ aiProvider: 'gemini', aiModel: 'gemini-2.5-flash' }).model).toBe('gemini-3.6-flash');
+    expect(resolveAI({ aiProvider: 'gemini', aiModel: 'gemini-3.6-flash' }).model).toBe('gemini-3.6-flash');
+    expect(resolveAI({ aiProvider: 'openai', aiModel: 'gpt-5-mini' }).model).toBe('gpt-5-mini');
+  });
+});

@@ -11,9 +11,22 @@ import { OpenAIProvider, openaiModel } from './openai.js';
  */
 export type AIChoice = { provider: 'gemini' | 'openai' | 'anthropic'; model: string };
 
+/**
+ * Модели, которые Google снял: для новых ключей 2.5 Flash уже «не найдена»,
+ * с 1 декабря 2026 — для всех. Кто выбрал её раньше — молча отвечаем
+ * актуальной, а не передаём всех клиентов менеджерам с ошибкой.
+ */
+const RETIRED: Record<string, string> = {
+  'gemini-2.5-flash': 'gemini-3.6-flash',
+  'gemini-2.5-pro': 'gemini-3.6-flash',
+  'gemini-2.5-flash-lite': 'gemini-3.6-flash',
+  'gemini-2.0-flash': 'gemini-3.6-flash',
+};
+export const currentModel = (model: string) => RETIRED[model.trim().toLowerCase()] ?? model;
+
 function geminiDefault() {
   const m = process.env.AI_MODEL ?? '';
-  return /^gemini/i.test(m) ? m : 'gemini-3.6-flash';
+  return /^gemini/i.test(m) ? currentModel(m) : 'gemini-3.6-flash';
 }
 
 export function defaultModelFor(provider: 'gemini' | 'openai') {
@@ -31,7 +44,7 @@ export function serverDefault(): AIChoice {
 /** ИИ компании: её выбор из настроек ассистента или умолчание сервера. */
 export function resolveAI(config?: { aiProvider?: string | null; aiModel?: string | null } | null): AIChoice {
   const p = config?.aiProvider;
-  if (p === 'gemini' || p === 'openai') return { provider: p, model: config?.aiModel || defaultModelFor(p) };
+  if (p === 'gemini' || p === 'openai') return { provider: p, model: config?.aiModel ? currentModel(config.aiModel) : defaultModelFor(p) };
   return serverDefault();
 }
 
@@ -49,7 +62,7 @@ export function getAIFor(choice: AIChoice): AIProvider {
       process.env.GEMINI_API_KEY ?? '',
       choice.model,
       process.env.AI_EMBED_MODEL ?? 'gemini-embedding-001',
-      /^gemini/i.test(transcribe) ? transcribe : choice.model,
+      /^gemini/i.test(transcribe) ? currentModel(transcribe) : choice.model,
     );
   } else if (choice.provider === 'openai') {
     provider = new OpenAIProvider(process.env.OPENAI_API_KEY ?? '', choice.model);

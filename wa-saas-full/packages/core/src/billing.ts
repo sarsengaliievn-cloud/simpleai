@@ -21,7 +21,7 @@ export type ModelInfo = {
 /** Модели на выбор. Цены — по умолчанию, владелец платформы может их поменять. */
 export const MODELS: ModelInfo[] = [
   { id: 'gemini-3.6-flash', provider: 'gemini', label: 'Gemini 3.6 Flash', note: 'Быстрый, хорошо понимает казахский', inUsd: 0.75, outUsd: 3.75 },
-  { id: 'gemini-2.5-flash', provider: 'gemini', label: 'Gemini 2.5 Flash', note: 'Дешевле, чуть проще в ответах', inUsd: 0.3, outUsd: 2.5 },
+  // Gemini 2.5 Flash Google снял (новым ключам недоступна, с 1.12.2026 — всем).
   { id: 'gpt-5-mini', provider: 'openai', label: 'ChatGPT 5 mini', note: 'Баланс цены и качества', inUsd: 0.25, outUsd: 2 },
   { id: 'gpt-5-nano', provider: 'openai', label: 'ChatGPT 5 nano', note: 'Самый дешёвый, для простых вопросов', inUsd: 0.05, outUsd: 0.4 },
   { id: 'gpt-5', provider: 'openai', label: 'ChatGPT 5', note: 'Самый умный, дороже остальных', inUsd: 1.25, outUsd: 10 },

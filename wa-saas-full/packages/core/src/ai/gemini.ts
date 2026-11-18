@@ -15,10 +15,10 @@ export class GeminiProvider implements AIProvider {
 
   constructor(
     private readonly apiKey = process.env.GEMINI_API_KEY ?? '',
-    private readonly model = process.env.AI_MODEL ?? 'gemini-2.5-flash',
+    private readonly model = process.env.AI_MODEL ?? 'gemini-3.6-flash',
     private readonly embedModel = process.env.AI_EMBED_MODEL ?? 'gemini-embedding-001',
     /** Расшифровка — та же модель, если не задана отдельная. */
-    private readonly transcribeModel = process.env.AI_TRANSCRIBE_MODEL || process.env.AI_MODEL || 'gemini-2.5-flash',
+    private readonly transcribeModel = process.env.AI_TRANSCRIBE_MODEL || process.env.AI_MODEL || 'gemini-3.6-flash',
   ) {}
 
   /** Gemini слушает аудио сам: отдельный сервис распознавания речи не нужен. */
