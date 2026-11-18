@@ -202,3 +202,22 @@ describe('этапы под свою воронку', () => {
     expect(t.deal![0]!.stageId).toBe('s7');
   });
 });
+
+import { ensureOpenDeal, SILENT_REASON } from './crm.js';
+describe('клиент «не отвечал», но снова написал', () => {
+  it('сделка возвращается на свой этап', async () => {
+    const { db, t } = fakeDb(SHOQAI);
+    t.deal!.push({ id: 'd1', customerId: 'c1', stageId: 's10', archivedAt: null, amount: null, product: null, wonAt: null, lostAt: new Date(), lostReason: SILENT_REASON, stageChangedAt: new Date() });
+    t.dealEvent!.push({ id: 'e1', dealId: 'd1', type: 'lost', data: { from: 's5', to: 's10' } });
+    const d = await ensureOpenDeal(db, { customerId: 'c1', conversationId: 'v1' });
+    expect(d?.id).toBe('d1');
+    expect(t.deal![0]!.stageId).toBe('s5');
+    expect(t.deal![0]!.lostReason).toBeNull();
+  });
+  it('сам отказался — остаётся в отказе (пишет вдогонку)', async () => {
+    const { db, t } = fakeDb(SHOQAI);
+    t.deal!.push({ id: 'd1', customerId: 'c1', stageId: 's10', archivedAt: null, amount: null, product: null, wonAt: null, lostAt: new Date(), lostReason: 'дорого', stageChangedAt: new Date() });
+    expect(await ensureOpenDeal(db, { customerId: 'c1', conversationId: 'v1' })).toBeNull();
+    expect(t.deal![0]!.stageId).toBe('s10');
+  });
+});

@@ -104,6 +104,10 @@ model Company {
   autoAssign    Boolean  @default(false)
   /// Через сколько часов без движения клиент считается зависшим.
   staleHours    Int      @default(24)
+  /// ИИ сам переносит клиентов по этапам по смыслу переписки.
+  aiStages      Boolean  @default(true)
+  /// Через сколько дней молчания клиента после нашего сообщения — «нет ответа».
+  noAnswerDays  Int      @default(3)
   /// Интеграция со складом: SHA-256 ключа, с которым склад присылает
   /// интернет-заказы (сам ключ показывается владельцу один раз).
   orderHookHash String?  @unique
@@ -562,6 +566,8 @@ model PipelineStage {
   companyId String    @db.Uuid
   name      String
   kind      StageKind
+  /// Подсказка ИИ: когда ставить клиента на этот этап. «-» — ИИ этот этап не ставит.
+  aiHint    String?
   position  Int
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -603,6 +609,10 @@ model Deal {
   archivedAt     DateTime?
   archiveReason  String?
   stageChangedAt DateTime  @default(now())
+  /// Когда этап последний раз меняли руками — ИИ сутки такую сделку не трогает.
+  manualStageAt  DateTime?
+  /// Когда ИИ последний раз смотрел переписку для этапа.
+  aiStageAt      DateTime?
   /// Даты ключевых событий — по ним считается конверсия за период.
   assignedAt     DateTime?
   orderedAt      DateTime?

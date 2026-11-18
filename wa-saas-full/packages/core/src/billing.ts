@@ -130,7 +130,7 @@ export async function hasBalance(companyId: string): Promise<boolean> {
   return Boolean(company?.billingExempt) || (company?.balanceTiyn ?? 0) > 0;
 }
 
-export type UsageKind = 'reply' | 'playground' | 'knowledge' | 'voice';
+export type UsageKind = 'reply' | 'playground' | 'knowledge' | 'voice' | 'stages';
 
 /**
  * Записать расход и списать с баланса — одной транзакцией. Баланс может

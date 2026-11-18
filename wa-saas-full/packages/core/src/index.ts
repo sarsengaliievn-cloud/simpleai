@@ -13,3 +13,4 @@ export * from './inbox.js';
 export * from './templates.js';
 export * from './day-stats.js';
 export * from './knowledge-file.js';
+export * from './stage-ai.js';

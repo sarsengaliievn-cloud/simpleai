@@ -15,6 +15,7 @@ const KIND: Record<string, string> = {
   playground: 'Тестовый чат и проверка поиска',
   knowledge: 'База знаний (загрузка документов)',
   voice: 'Расшифровка голосовых',
+  stages: 'ИИ: этапы клиентов',
 };
 const TX: Record<string, string> = { topup: 'Пополнение', bonus: 'Бонус', adjust: 'Корректировка' };
 const REQ: Record<string, [string, string]> = { open: ['chip-warn', 'Ждёт зачисления'], done: ['chip-ok', 'Зачислено'], rejected: ['chip-bad', 'Отклонена'] };

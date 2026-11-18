@@ -692,3 +692,15 @@ video.msg-media{max-height:360px}
 .kb-acts form{display:inline}
 .kb-modal{width:min(760px,100%)}
 .kb-text{min-height:min(52vh,460px);font-size:14px;line-height:1.5}
+
+/* ИИ-воронка в редакторе этапов */
+.ai-stages{border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;margin-bottom:14px;background:var(--surface-2)}
+.ai-stages p{margin-top:4px;max-width:78ch}
+.stage-edit-list li:has(.stage-hint){flex-wrap:wrap;row-gap:4px}
+.stage-hint{order:10;flex:1 1 100%;display:flex;gap:8px;align-items:center;min-width:0;padding-left:20px}
+.stage-edit-list .stage-hint .input{flex:1;min-width:0;max-width:none;height:30px;padding:4px 8px;font-size:13px}
+.stage-hint>.tiny:first-child{flex:none}
+@media (max-width:720px){
+  .stage-edit-list li:has(.stage-hint){grid-template-areas:"dot name tools" ". kind kind" ". hint hint"}
+  .stage-hint{grid-area:hint;padding-left:0;flex-direction:column;align-items:stretch;gap:3px}
+}

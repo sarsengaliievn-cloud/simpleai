@@ -119,12 +119,21 @@ export async function saveStagesAction(draft: StageDraft[]): Promise<DealResult>
   const kinds = new Set(['NEW', 'WORK', 'ORDER', 'WON', 'LOST']);
   const clean = draft
     .filter((s) => s && typeof s.name === 'string' && kinds.has(s.kind))
-    .map((s) => ({ id: typeof s.id === 'string' ? s.id : null, name: s.name.slice(0, 60), kind: s.kind }));
+    .map((s) => ({ id: typeof s.id === 'string' ? s.id : null, name: s.name.slice(0, 60), kind: s.kind, aiHint: typeof s.aiHint === 'string' ? s.aiHint.slice(0, 300) : null }));
   try {
     await saveStages(ctx.db, clean);
   } catch (error) {
     return fail(error);
   }
+  refresh();
+  return { ok: true };
+}
+
+/** ИИ сам переносит клиентов по этапам; через сколько дней молчания — «нет ответа». */
+export async function saveAiStagesAction(enabled: boolean, days: number): Promise<DealResult> {
+  const ctx = await requireCompany('settings:manage');
+  const noAnswerDays = Math.min(30, Math.max(1, Math.round(Number(days) || 3)));
+  await prisma.company.update({ where: { id: ctx.company.id }, data: { aiStages: !!enabled, noAnswerDays } });
   refresh();
   return { ok: true };
 }

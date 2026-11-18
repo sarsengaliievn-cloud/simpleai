@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { can, isStale, lostReasonsOf, onShiftNow, type StageKind } from '@wa/core';
+import { can, isStale, lostReasonsOf, onShiftNow, defaultStageHint, skladStageIds, type StageKind } from '@wa/core';
 import { requireCompany } from '@/lib/session';
 import { Shell } from '@/components/Shell';
 import { Kanban, type KanbanCard } from '@/components/crm/Kanban';
@@ -154,11 +154,17 @@ export default async function DealsPage({ searchParams }: Props) {
       <div className={`page deals-page ${editStages && canEditStages ? '' : 'deals-fit'}`}>
         {editStages && canEditStages && (
           <StageEditor
-            key={stages.map((s) => s.id + s.name + s.kind).join('|')}
+            key={stages.map((s) => s.id + s.name + s.kind + (s.aiHint ?? '')).join('|')}
             stages={stages}
             counts={counts}
             lostReasons={lostReasons}
             customReasons={(company.lostReasons ?? []).length > 0}
+            ai={{
+              enabled: company.aiStages,
+              days: company.noAnswerDays,
+              defaults: Object.fromEntries(stages.map((s) => [s.id, defaultStageHint(s.name, s.kind)])),
+              sklad: [...skladStageIds(stages.map((s, position) => ({ ...s, position })), company.orderStageMap)],
+            }}
           />
         )}
 

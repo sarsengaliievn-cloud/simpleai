@@ -2,7 +2,7 @@
 import './env.js';
 
 import { Worker } from 'bullmq';
-import { QUEUES, autoCloseConversations, type AiReplyJob, type InboundMessageJob, type IngestDocumentJob } from '@wa/core';
+import { QUEUES, autoCloseConversations, runAiStages, type AiReplyJob, type InboundMessageJob, type IngestDocumentJob } from '@wa/core';
 import { prisma } from '@wa/db';
 import { connection } from './redis.js';
 import { processInboundMessage } from './processors/inbound-message.js';
@@ -53,6 +53,21 @@ const runAutoClose = () =>
 const autoCloseStart = setTimeout(runAutoClose, Math.min(60_000, AUTO_CLOSE_EVERY_MS));
 const autoCloseTimer = setInterval(runAutoClose, AUTO_CLOSE_EVERY_MS);
 
+// ИИ ведёт воронку: раз в 5 минут смотрит переписки, где что-то изменилось,
+// и переносит клиентов по этапам; молчащих N дней — в «нет ответа».
+const AI_STAGES_EVERY_MS = Number(process.env.AI_STAGES_EVERY_MS) || 5 * 60 * 1000;
+let stagesBusy = false;
+const runStages = () => {
+  if (stagesBusy) return;
+  stagesBusy = true;
+  runAiStages(prisma)
+    .then((r) => (r.moved || r.silent) && console.log(`[stages] проверено ${r.checked}, перенесено ${r.moved}, нет ответа ${r.silent}`))
+    .catch((error) => console.error('[stages]:', (error as Error).message))
+    .finally(() => { stagesBusy = false; });
+};
+const stagesStart = setTimeout(runStages, Math.min(90_000, AI_STAGES_EVERY_MS));
+const stagesTimer = setInterval(runStages, AI_STAGES_EVERY_MS);
+
 let stopping = false;
 async function shutdown() {
   if (stopping) return;
@@ -60,6 +75,8 @@ async function shutdown() {
   console.log('[worker] останавливаюсь');
   clearTimeout(autoCloseStart);
   clearInterval(autoCloseTimer);
+  clearTimeout(stagesStart);
+  clearInterval(stagesTimer);
   await worker.close();
   await ingestWorker.close();
   await replyWorker.close();

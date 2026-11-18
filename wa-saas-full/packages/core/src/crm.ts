@@ -69,6 +69,20 @@ export async function ensureStages(db: TenantClient) {
   return db.pipelineStage.findMany({ orderBy: { position: 'asc' } });
 }
 
+/** Причина отказа, которую ставит ИИ за молчание клиента. */
+export const SILENT_REASON = 'Не отвечает';
+
+async function reopenSilent(db: TenantClient, dealId: string) {
+  const lost = await db.dealEvent.findFirst({ where: { dealId, type: 'lost' }, orderBy: { createdAt: 'desc' }, select: { data: true } });
+  const from = (lost?.data as { from?: string } | null)?.from;
+  const stages = await ensureStages(db);
+  const target = stages.find((s) => s.id === from && s.kind !== 'WON' && s.kind !== 'LOST') ?? stages.find((s) => s.kind === 'NEW') ?? stages[0]!;
+  const now = new Date();
+  await db.deal.updateMany({ where: { id: dealId }, data: { stageId: target.id, stageChangedAt: now, lostAt: null, lostReason: null } });
+  await db.dealEvent.create({ data: { dealId, type: 'stage', text: `Клиент снова написал — вернули в «${target.name}»` } as never });
+  return db.deal.findFirst({ where: { id: dealId } });
+}
+
 /**
  * Открытая сделка клиента или новая на этапе «Новый». Вызывается на каждое
  * входящее: сделка заводится сама, вручную создавать ничего не нужно.
@@ -92,8 +106,14 @@ export async function ensureOpenDeal(
   const lastClosed = await db.deal.findFirst({
     where: { customerId: input.customerId },
     orderBy: { updatedAt: 'desc' },
-    select: { wonAt: true, lostAt: true },
+    select: { id: true, wonAt: true, lostAt: true, lostReason: true, archivedAt: true },
   });
+  // «Не отвечает» ставит ИИ за молчание. Клиент снова написал — значит,
+  // не пропал: возвращаем сделку туда, где она была, а не теряем его.
+  if (lastClosed && !lastClosed.wonAt && !lastClosed.archivedAt && lastClosed.lostReason === SILENT_REASON) {
+    const back = await reopenSilent(db, lastClosed.id);
+    if (back) return back;
+  }
   const closedAt = lastClosed?.wonAt ?? lastClosed?.lostAt;
   if (closedAt && Date.now() - closedAt.getTime() < REOPEN_AFTER_MS) return null;
 
@@ -121,7 +141,11 @@ export async function ensureOpenDeal(
  */
 export async function moveDeal(
   db: TenantClient,
-  input: { dealId: string; stageId: string; actorUserId?: string | null } & StageMoveInput & { comment?: string | null },
+  input: { dealId: string; stageId: string; actorUserId?: string | null } & StageMoveInput & {
+    comment?: string | null;
+    /** Перенёс ИИ: почему — в историю, рядом с этапами. */
+    aiReason?: string | null;
+  },
 ) {
   const [deal, stage] = await Promise.all([
     db.deal.findFirst({ where: { id: input.dealId }, include: { stage: true } }),
@@ -142,6 +166,8 @@ export async function moveDeal(
     data: {
       stageId: stage.id,
       stageChangedAt: deal.stageId === stage.id ? deal.stageChangedAt : now,
+      // Человек сам выбрал этап — ИИ сутки с ним не спорит.
+      ...(input.actorUserId && deal.stageId !== stage.id ? { manualStageAt: now } : {}),
       amount,
       product,
       ...(input.comment !== undefined ? { comment: input.comment?.trim() || null } : {}),
@@ -159,6 +185,7 @@ export async function moveDeal(
   if (deal.stageId !== stage.id || kind === 'ORDER') {
     const text =
       kind === 'ORDER' ? `Новый заказ: ${product} — ${formatMoney(amount)}`
+      : input.aiReason ? `ИИ: ${deal.stage.name} → ${stage.name} (${input.aiReason})`
       : kind === 'LOST' ? `Отказ: ${lostReason}`
       : `Этап: ${deal.stage.name} → ${stage.name}`;
     await db.dealEvent.create({
@@ -186,7 +213,8 @@ export async function assignDeal(
   if (!deal) throw new CrmError('Сделка не найдена');
 
   const stages = await ensureStages(db);
-  const work = stages.find((s) => s.kind === 'WORK');
+  // Есть этап «У менеджера» — туда, иначе первый этап «в работе».
+  const work = stages.find((s) => s.kind === 'WORK' && /менеджер/i.test(s.name)) ?? stages.find((s) => s.kind === 'WORK');
   const now = new Date();
   const moveToWork = deal.stage.kind === 'NEW' && work;
 
@@ -231,7 +259,7 @@ export async function assignDeal(
 
 /* ── Этапы: тип, порядок, удаление ─────────────────────────── */
 
-export type StageDraft = { id?: string | null; name: string; kind: StageKind };
+export type StageDraft = { id?: string | null; name: string; kind: StageKind; aiHint?: string | null };
 
 const MAX_STAGES = 12;
 
@@ -288,7 +316,7 @@ export async function saveStages(db: TenantClient, draft: StageDraft[]) {
   const current = await ensureStages(db);
   const newStage = current.find((s) => s.kind === 'NEW') ?? null;
   const known = new Set(current.map((s) => s.id));
-  const clean = draft.map((s) => ({ id: s.id && known.has(s.id) ? s.id : null, name: s.name.trim(), kind: s.kind }));
+  const clean = draft.map((s) => ({ id: s.id && known.has(s.id) ? s.id : null, name: s.name.trim(), kind: s.kind, aiHint: s.aiHint?.trim().slice(0, 300) || null }));
   const problem = stagesProblem(clean, newStage?.id ?? null);
   if (problem) throw new CrmError(problem);
 
@@ -298,11 +326,11 @@ export async function saveStages(db: TenantClient, draft: StageDraft[]) {
   for (const [position, s] of clean.entries()) {
     if (s.id) {
       const before = current.find((c) => c.id === s.id)!;
-      await db.pipelineStage.updateMany({ where: { id: s.id }, data: { name: s.name, kind: s.kind, position } });
+      await db.pipelineStage.updateMany({ where: { id: s.id }, data: { name: s.name, kind: s.kind, position, aiHint: s.aiHint } });
       if (before.kind !== s.kind) changedKind.push({ id: s.id, kind: s.kind });
       ids.push(s.id);
     } else {
-      const created = await db.pipelineStage.create({ data: { name: s.name, kind: s.kind, position } as never });
+      const created = await db.pipelineStage.create({ data: { name: s.name, kind: s.kind, position, aiHint: s.aiHint } as never });
       ids.push(created.id);
     }
   }
