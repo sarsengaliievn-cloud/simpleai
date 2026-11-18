@@ -669,3 +669,26 @@ video.msg-media{max-height:360px}
 .tpl-send .select{max-width:280px}
 .tpl-send .input{max-width:240px}
 .thread-f.win-closed>.row,.thread-f.win-closed>.tiny{display:none}
+
+/* Аналитика: период и таблица по дням */
+.an-period{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end}
+.an-dates{display:inline-flex;gap:6px;align-items:center}
+.an-dates .input{width:auto;padding:5px 8px;font-size:13px}
+.an-dates.on .input{border-color:var(--pine)}
+.an-days td,.an-days th{white-space:nowrap}
+.an-days tr.muted td{color:var(--muted)}
+.an-days tfoot td{border-top:2px solid var(--line);font-weight:700;background:var(--surface-2)}
+@media (max-width:1100px){
+  .top:has(.an-period){flex-wrap:wrap}
+  .top-a:has(.an-period){flex:1 1 100%;min-width:0}
+  .an-period{justify-content:flex-start;min-width:0;flex:1}
+  .an-period .seg{max-width:100%;overflow-x:auto;scrollbar-width:none}
+  .an-period .seg a{white-space:nowrap}
+}
+@media (max-width:520px){.an-dates{flex:1 1 100%}.an-dates .input{flex:1 1 0;min-width:0;padding:5px 6px}.an-dates .btn{flex:none}}
+
+/* База знаний: действия с документом */
+.kb-acts{display:flex;gap:2px;justify-content:flex-end;flex-wrap:wrap}
+.kb-acts form{display:inline}
+.kb-modal{width:min(760px,100%)}
+.kb-text{min-height:min(52vh,460px);font-size:14px;line-height:1.5}

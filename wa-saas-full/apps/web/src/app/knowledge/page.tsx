@@ -7,7 +7,7 @@ import { KnowledgeSearch } from '@/components/KnowledgeSearch';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { embedFamily, resolveAI } from '@wa/core';
 import { ReindexBanner } from '@/components/ReindexBanner';
-import { removeDocument } from './actions';
+import { KnowledgeDocActions } from '@/components/KnowledgeDocActions';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +40,12 @@ export default async function KnowledgePage() {
           <span className="chip" style={{ marginLeft: 'auto', flex: 'none' }}>
             {docs.length} документов · {chunks} фрагментов
           </span>
+          {docs.length > 0 && (
+            <a className="btn btn-sm" style={{ flex: 'none' }} href="/api/knowledge/export" download
+               title="Вся база одним файлом: поправьте и загрузите обратно — обновятся те же документы">
+              Скачать базу
+            </a>
+          )}
         </header>
 
         <div className="page">
@@ -77,9 +83,7 @@ export default async function KnowledgePage() {
                             <td className="mono">{d.chunkCount}</td>
                             <td><span className={`chip ${cls}`}>{label}</span></td>
                             <td>
-                              <form action={removeDocument.bind(null, d.id)}>
-                                <button className="btn btn-quiet btn-sm" type="submit">Удалить</button>
-                              </form>
+                              <KnowledgeDocActions id={d.id} title={d.title} />
                             </td>
                           </tr>
                         );

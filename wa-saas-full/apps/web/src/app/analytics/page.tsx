@@ -1,26 +1,29 @@
 import Link from 'next/link';
-import { funnel, isStale, sourceLabel, type StageKind } from '@wa/core';
+import { funnel, isStale, sourceLabel, resolvePeriod, type StageKind } from '@wa/core';
 import { requireCompany } from '@/lib/session';
 import { Shell } from '@/components/Shell';
 import { DayBars } from '@/components/DayBars';
 import { money } from '@/lib/format';
+import { loadDayTable } from '@/lib/day-analytics';
 
 export const dynamic = 'force-dynamic';
 
-const PERIODS: Array<[number, string]> = [[7, '7 дней'], [30, '30 дней'], [90, '90 дней']];
+const PERIODS: Array<[string, string]> = [['today', 'Сегодня'], ['yesterday', 'Вчера'], ['7', '7 дней'], ['30', '30 дней'], ['90', '90 дней']];
 const DAY = 24 * 60 * 60 * 1000;
 
-type Props = { searchParams: Promise<{ d?: string }> };
+type Props = { searchParams: Promise<{ d?: string; from?: string; to?: string }> };
 
 export default async function AnalyticsPage({ searchParams }: Props) {
-  const { d } = await searchParams;
-  const days = PERIODS.some(([n]) => String(n) === d) ? Number(d) : 30;
+  const params = await searchParams;
   const ctx = await requireCompany('analytics:read');
   const { db, company, ownDeals, seesOnlyOwn } = ctx;
+  const tz = company.timezone || 'Asia/Almaty';
 
-  const to = new Date();
-  const from = new Date(to.getTime() - days * DAY);
-  const inPeriod = { gte: from };
+  // Дни — календарные в поясе компании: «Сегодня» — с полуночи по Алматы.
+  const period = resolvePeriod(params, tz);
+  const { from, to } = period;
+  const inPeriod = { gte: from, lt: to };
+  const query = period.id === 'custom' ? `from=${period.fromKey}&to=${period.toKey}` : `d=${period.id}`;
 
   // Все сделки, у которых в периоде было хоть одно событие воронки.
   const deals = await db.deal.findMany({
@@ -40,18 +43,15 @@ export default async function AnalyticsPage({ searchParams }: Props) {
   const f = funnel(deals, from, to);
 
   // По дням — в часовом поясе компании, иначе ночные заявки уезжают во вчера.
-  const dayKey = new Intl.DateTimeFormat('en-CA', { timeZone: company.timezone || 'Asia/Almaty', year: 'numeric', month: '2-digit', day: '2-digit' });
-  const label = new Intl.DateTimeFormat('ru-RU', { timeZone: company.timezone || 'Asia/Almaty', day: 'numeric', month: 'short' });
-  const keys: Array<{ key: string; label: string }> = [];
-  for (let i = days - 1; i >= 0; i -= 1) {
-    const at = new Date(to.getTime() - i * DAY);
-    keys.push({ key: dayKey.format(at), label: label.format(at) });
-  }
+  const dayKey = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+  const dayName = (k: string) => new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: 'numeric', month: 'short' }).format(new Date(`${k}T00:00:00Z`));
+  const weekday = (k: string) => new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', weekday: 'short' }).format(new Date(`${k}T00:00:00Z`));
+  const keys = period.keys.map((key) => ({ key, label: dayName(key) }));
   const count = (pick: (x: (typeof deals)[number]) => Date | null) => {
     const map = new Map(keys.map((k) => [k.key, 0]));
     for (const x of deals) {
       const at = pick(x);
-      if (at && at >= from) {
+      if (at && at >= from && at < to) {
         const k = dayKey.format(at);
         if (map.has(k)) map.set(k, map.get(k)! + 1);
       }
@@ -142,12 +142,24 @@ export default async function AnalyticsPage({ searchParams }: Props) {
       ]);
   const aiShare = aiAnswers + humanAnswers ? Math.round((aiAnswers / (aiAnswers + humanAnswers)) * 100) : 0;
 
+  // По дням. Склад подключён — заказы и выручка оттуда, и сверху тоже.
+  const day = await loadDayTable(ctx, period);
+  const sales = day.fromSklad
+    ? { ordered: day.total.orders, won: day.total.completed, revenue: day.total.revenue, conversion: day.total.conversion ?? 0, avg: day.total.averageCheck ?? 0 }
+    : { ordered: f.ordered, won: f.won, revenue: f.revenue, conversion: f.conversion, avg: f.averageCheck };
+  const orderHint = day.fromSklad ? 'оплаченные заказы склада от клиентов WhatsApp' : 'этап с типом «Заказ» или «Купил»';
+  if (day.fromSklad) {
+    const byKey = new Map(day.rows.map((r) => [r.key, r.orders]));
+    ordersByDay.splice(0, ordersByDay.length, ...keys.map((k) => ({ label: k.label, value: byKey.get(k.key) ?? 0 })));
+  }
+
   const steps: Array<{ label: string; value: number; hint: string }> = [
     { label: 'Обращения', value: f.created, hint: 'клиент написал' },
     { label: 'Переданы менеджеру', value: f.assigned, hint: 'вы передали клиента' },
-    { label: 'Заказы', value: f.ordered, hint: 'этап с типом «Заказ» или «Купил»' },
-    { label: 'Купили', value: f.won, hint: 'этап с типом «Купил»' },
+    { label: 'Заказы', value: sales.ordered, hint: orderHint },
+    { label: 'Купили', value: sales.won, hint: day.fromSklad ? 'выкуплены в складе' : 'этап с типом «Купил»' },
   ];
+  const pctNum = (v: number | null) => (v === null ? '—' : `${String(v).replace('.', ',')}%`);
   const top = Math.max(1, ...steps.map((s) => s.value));
   const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—');
 
@@ -157,13 +169,21 @@ export default async function AnalyticsPage({ searchParams }: Props) {
       title="Аналитика"
       hint={seesOnlyOwn ? 'Ваши клиенты: сколько пришло и сколько купили' : 'Сколько клиентов написало и сколько из них купило'}
       actions={
-        <nav className="seg" aria-label="Период">
-          {PERIODS.map(([n, text]) => (
-            <Link key={n} href={`/analytics?d=${n}`} className={n === days ? 'on' : ''} aria-current={n === days ? 'page' : undefined}>
-              {text}
-            </Link>
-          ))}
-        </nav>
+        <div className="an-period">
+          <nav className="seg" aria-label="Период">
+            {PERIODS.map(([n, text]) => (
+              <Link key={n} href={`/analytics?d=${n}`} className={n === period.id ? 'on' : ''} aria-current={n === period.id ? 'page' : undefined}>
+                {text}
+              </Link>
+            ))}
+          </nav>
+          <form className={`an-dates ${period.id === 'custom' ? 'on' : ''}`} action="/analytics" method="get">
+            <input type="date" name="from" className="input" defaultValue={period.fromKey} aria-label="С даты" />
+            <span className="muted">—</span>
+            <input type="date" name="to" className="input" defaultValue={period.toKey} aria-label="По дату" />
+            <button className="btn btn-sm" type="submit">Показать</button>
+          </form>
+        </div>
       }
     >
       <div className="page">
@@ -175,18 +195,18 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           </div>
           <div className="kpi">
             <div className="kpi-l">Заказов</div>
-            <div className="kpi-v">{f.ordered}</div>
-            <div className="kpi-d muted">{f.won ? `${f.won} уже купили` : 'заказ или «Купил»'}</div>
+            <div className="kpi-v">{sales.ordered}</div>
+            <div className="kpi-d muted">{sales.won ? `${sales.won} уже ${day.fromSklad ? 'выкупили' : 'купили'}` : day.fromSklad ? 'оплаченные, из склада' : 'заказ или «Купил»'}</div>
           </div>
           <div className="kpi kpi-accent">
             <div className="kpi-l">Конверсия в заказ</div>
-            <div className="kpi-v">{f.created ? `${String(f.conversion).replace('.', ',')}%` : '—'}</div>
+            <div className="kpi-v">{f.created ? `${String(sales.conversion).replace('.', ',')}%` : '—'}</div>
             <div className="kpi-d muted">заказы ÷ обращения</div>
           </div>
           <div className="kpi">
             <div className="kpi-l">Выручка</div>
-            <div className="kpi-v">{money(f.revenue)}</div>
-            <div className="kpi-d muted">средний чек {f.ordered ? money(f.averageCheck) : '—'}</div>
+            <div className="kpi-v">{money(sales.revenue)}</div>
+            <div className="kpi-d muted">средний чек {sales.ordered ? money(sales.avg) : '—'}</div>
           </div>
           <div className="kpi">
             <div className="kpi-l">До заказа</div>
@@ -195,10 +215,77 @@ export default async function AnalyticsPage({ searchParams }: Props) {
           </div>
         </div>
 
+        <section className="card" style={{ overflowX: 'auto', marginBottom: 18 }}>
+          <div className="card-p spread" style={{ paddingBottom: 0, alignItems: 'flex-start', gap: 12 }}>
+            <div>
+              <h2 className="card-t">По дням</h2>
+              <p className="tiny muted">
+                Лиды — новые клиенты в WhatsApp (без «просто вопросов» и спама). Заказы — {orderHint}.
+                Выкуплено и отменено — из заказов этого же дня.
+              </p>
+            </div>
+            <a className="btn btn-sm" href={`/api/analytics/export?${query}`} download>Скачать Excel</a>
+          </div>
+          <table className="an-days">
+            <thead>
+              <tr>
+                <th>День</th>
+                <th className="num">Лиды</th>
+                <th className="num" title="Пришли с рекламы Instagram / Facebook">из рекламы</th>
+                <th className="num" title="Бот или менеджер ответили за 15 минут">ответ ≤15 мин</th>
+                <th className="num" title="Никто так и не ответил">без ответа</th>
+                <th className="num">Заказы</th>
+                <th className="num">Сумма</th>
+                <th className="num">Конверсия</th>
+                <th className="num">Средний чек</th>
+                <th className="num">Выкуплено</th>
+                <th className="num" title="Отменены или вернулись">Отмена / возврат</th>
+                <th className="num" title="Сделки, ушедшие в «Отказ»">Отказы</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...day.rows].reverse().map((r) => (
+                <tr key={r.key} className={r.leads || r.orders ? '' : 'muted'}>
+                  <td className="nowrap" style={{ fontWeight: 600 }}>{dayName(r.key)} <span className="tiny muted">{weekday(r.key)}</span></td>
+                  <td className="num">{r.leads}</td>
+                  <td className="num">{r.fromAds || ''}</td>
+                  <td className="num">{r.leads ? `${r.answeredFast}` : ''}</td>
+                  <td className={`num ${r.unanswered ? 'danger' : ''}`}>{r.unanswered || ''}</td>
+                  <td className="num" style={{ fontWeight: 600 }}>{r.orders}</td>
+                  <td className="num nowrap">{r.revenue ? money(r.revenue) : ''}</td>
+                  <td className="num">{pctNum(r.conversion)}</td>
+                  <td className="num nowrap">{r.averageCheck ? money(r.averageCheck) : ''}</td>
+                  <td className="num">{r.completed || ''}</td>
+                  <td className="num">{r.cancelled || ''}</td>
+                  <td className="num">{r.lost || ''}</td>
+                </tr>
+              ))}
+            </tbody>
+            {day.rows.length > 1 && (
+              <tfoot>
+                <tr>
+                  <td style={{ fontWeight: 700 }}>Итого</td>
+                  <td className="num">{day.total.leads}</td>
+                  <td className="num">{day.total.fromAds}</td>
+                  <td className="num">{day.total.answeredFast}</td>
+                  <td className="num">{day.total.unanswered}</td>
+                  <td className="num">{day.total.orders}</td>
+                  <td className="num nowrap">{money(day.total.revenue)}</td>
+                  <td className="num">{pctNum(day.total.conversion)}</td>
+                  <td className="num nowrap">{day.total.averageCheck ? money(day.total.averageCheck) : '—'}</td>
+                  <td className="num">{day.total.completed}</td>
+                  <td className="num">{day.total.cancelled}</td>
+                  <td className="num">{day.total.lost}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </section>
+
         <div className="an-grid">
           <section className="card card-p">
             <h2 className="card-t">Воронка</h2>
-            <p className="tiny muted" style={{ marginBottom: 16 }}>Сколько клиентов дошло до каждого шага за {days} дней</p>
+            <p className="tiny muted" style={{ marginBottom: 16 }}>Сколько клиентов дошло до каждого шага — {period.label}</p>
             <ol className="funnel">
               {steps.map((s, i) => (
                 <li key={s.label}>

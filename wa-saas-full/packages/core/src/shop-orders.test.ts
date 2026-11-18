@@ -158,6 +158,7 @@ describe('этапы под свою воронку', () => {
     const m = guessStageMap(SHOQAI as never);
     expect(m.draft).toBe('s6');
     expect(m.paid).toBe('s7');
+    expect(m.shipped).toBe('s7'); // не «отправлен каталог»
     expect(m.completed).toBe('s8');
     expect(m.cancelled).toBe('s10');
   });
@@ -187,6 +188,12 @@ describe('этапы под свою воронку', () => {
     await applyShopOrder(db, order({ status: 'paid' }));
     expect(t.deal![0]!.stageId).toBe('s7');
     expect(notes()).toBe(before);
+  });
+  it('отправленный заказ со сделкой на «Новый» — сразу в «Продажа»', async () => {
+    const { db, t } = fakeDb(SHOQAI);
+    t.deal!.push({ id: 'd1', customerId: 'c1', stageId: 's1', archivedAt: null, amount: null, product: null, stageChangedAt: new Date() });
+    await applyShopOrder(db, order({ status: 'shipped' }));
+    expect(t.deal![0]!.stageId).toBe('s7');
   });
   it('назад не двигает', async () => {
     const { db, t } = fakeDb(SHOQAI);

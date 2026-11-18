@@ -11,3 +11,5 @@ export * from './ai/index.js';
 export * from './catalog.js';
 export * from './inbox.js';
 export * from './templates.js';
+export * from './day-stats.js';
+export * from './knowledge-file.js';

@@ -139,7 +139,10 @@ export function guessStageMap(stages: StageLite[]): Record<ShopStatus, string | 
   const orderKind = stages.find((s) => s.kind === 'ORDER')?.id ?? null;
   const draft = by(open.filter((s) => s.kind !== 'WON'), /ждем оплат|ожида\S* оплат|оплат/) ?? orderKind;
   const paid = by(open, /продаж|оплачен|оформлен|заказ/) ?? orderKind ?? draft;
-  const shipped = by(open, /отправ|доставк|в пути|посылк/) ?? paid;
+  // «Отправлен каталог» — это про переписку, не про посылку; и посылка не
+  // может уехать раньше, чем заказ оплачен — ищем только после «оплачен».
+  const paidPos = stages.find((s) => s.id === paid)?.position ?? -1;
+  const shipped = by(open.filter((s) => s.position >= paidPos && !/каталог|прайс|фото/.test(norm(s.name))), /отправ|доставк|в пути|посылк/) ?? paid;
   const cancelled = by(lost, /отмен/) ?? lost[0]?.id ?? null;
   const returned = by(lost, /возврат/) ?? cancelled;
   return { draft, paid, assembled: paid, shipped, completed, cancelled, returned };

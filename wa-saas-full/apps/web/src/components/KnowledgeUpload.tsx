@@ -7,6 +7,7 @@ import { uploadDocument, addManualNote } from '@/app/knowledge/actions';
 export function KnowledgeUpload() {
   const [tab, setTab] = useState<'file' | 'manual'>('file');
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
   const [pending, start] = useTransition();
@@ -20,6 +21,7 @@ export function KnowledgeUpload() {
     const data = new FormData();
     data.set('file', file);
     setError(null);
+    setDone(null);
     start(async () => {
       // Сбой самого запроса (обрыв сети, лимит прокси) приходит исключением,
       // а не результатом — без catch кнопка просто «отжималась» без объяснений.
@@ -27,6 +29,12 @@ export function KnowledgeUpload() {
       if (!result.ok) setError(result.error);
       else {
         if (fileRef.current) fileRef.current.value = '';
+        // Загрузили обратно скачанную базу — говорим, что именно обновилось.
+        if ('updated' in result) {
+          setDone(result.updated || result.created
+            ? `Обновлено документов: ${result.updated}, новых: ${result.created}${result.unchanged ? `, без изменений: ${result.unchanged}` : ''}.`
+            : 'Изменений не нашлось — база осталась как была.');
+        }
         // Индексация идёт в воркере — обновляем, чтобы увидеть смену статуса.
         setTimeout(() => router.refresh(), 1500);
       }
@@ -52,6 +60,7 @@ export function KnowledgeUpload() {
       {error && (
         <div className="chip chip-bad" style={{ height: 'auto', padding: '7px 11px', marginBottom: 12 }}>{error}</div>
       )}
+      {done && <div className="chip chip-ok" style={{ height: 'auto', padding: '7px 11px', marginBottom: 12 }}>{done}</div>}
 
       {tab === 'file' ? (
         <>
@@ -61,6 +70,7 @@ export function KnowledgeUpload() {
             {pending ? 'Загружаю…' : 'Загрузить и проиндексировать'}
           </button>
           <p className="hint">PDF, DOCX, XLSX, TXT, CSV, MD — до 20 МБ. Скан без текстового слоя не подойдёт: нужен OCR.</p>
+          <p className="hint">Поправить всю базу разом: «Скачать базу» сверху → правите файл → загружаете его сюда. Обновятся те же документы, новые разделы добавятся.</p>
         </>
       ) : (
         <>

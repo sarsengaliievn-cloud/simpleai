@@ -498,6 +498,9 @@ model KnowledgeDocument {
   /// Чьими эмбеддингами построен индекс: gemini | openai. Сменили
   /// провайдера — индекс нужно обновить, иначе поиск вернёт мусор.
   embedProvider String?
+  /// Исходный текст — чтобы базу можно было скачать, поправить и загрузить
+  /// обратно. У документов, загруженных раньше, пусто: текст собирается из фрагментов.
+  content       String?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
