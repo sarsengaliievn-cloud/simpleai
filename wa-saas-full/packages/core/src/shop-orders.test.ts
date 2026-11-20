@@ -221,3 +221,14 @@ describe('клиент «не отвечал», но снова написал',
     expect(t.deal![0]!.stageId).toBe('s10');
   });
 });
+
+describe('свои этапы «Собран» и «Отправлен»', () => {
+  it('угадываются, «отправлен каталог» — нет', () => {
+    const st = ['Новый:NEW', 'отправлен каталог:WORK', 'Ждем оплату:WORK', 'Собран:WORK', 'Отправлен:WORK', 'Продажа:WORK', 'Выкупил:WON', 'Нету ответа отказ:LOST']
+      .map((x, position) => { const [name, kind] = x.split(':'); return { id: `s${position}`, name: name!, kind: kind!, position }; });
+    const m = guessStageMap(st);
+    expect(m.assembled).toBe('s3');
+    expect(m.shipped).toBe('s4');
+    expect(m.paid).toBe('s5');
+  });
+});

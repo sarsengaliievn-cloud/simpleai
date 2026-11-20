@@ -203,7 +203,9 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     await handOff(
       db,
       conversationId,
-      result.confidence === 0 && result.topScore === 0
+      result.managerOnly
+        ? 'Ассистент передал диалог менеджеру: возврат, обмен или брак — решает менеджер'
+        : result.confidence === 0 && result.topScore === 0
         ? 'Ассистент передал диалог менеджеру: в базе знаний нет ответа на этот вопрос'
         : `Ассистент передал диалог менеджеру: уверенность ${result.confidence}% при пороге ${config.confidenceThreshold}%`,
       { topScore: result.topScore, modelConfidence: result.modelConfidence },
@@ -253,6 +255,13 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
   // Подобранные модели — фотографиями, как показал бы продавец.
   if (sentCount === parts.length && result.photos?.length) {
     await sendPhotos(db, conversationId, result.photos);
+  }
+
+  // Возврат, обмен, брак: условия бот назвал, а решение — за менеджером.
+  if (result.managerOnly && sentCount > 0) {
+    await handOff(db, conversationId, 'Возврат, обмен или брак: ассистент назвал условия из базы, решение — за менеджером', { topScore: result.topScore });
+    console.log(`[ai] ${conversationId}: возврат/обмен — ответ отправлен и передано менеджеру`);
+    return;
   }
 
   console.log(`[ai] ${conversationId}: ответ отправлен (${result.confidence}%, частей ${sentCount}/${parts.length})`);

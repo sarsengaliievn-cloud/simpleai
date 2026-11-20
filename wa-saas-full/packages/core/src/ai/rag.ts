@@ -31,6 +31,8 @@ export type AnswerResult = {
   photos?: Array<{ url: string; caption: string }>;
   /** Пишет не покупатель (сотрудничество, реклама, вакансия) — про товары не отвечаем. */
   partner?: { lang: 'ru' | 'kk' } | null;
+  /** Возврат, обмен, брак — сразу менеджеру, без ответа бота. */
+  managerOnly?: boolean;
 };
 
 export type OrderField = 'model' | 'size' | 'city';
@@ -84,6 +86,18 @@ const SMALLTALK_NOTE =
   'Фрагментов базы знаний для этого сообщения нет: клиент просто здоровается или благодарит. ' +
   'Ответь коротко и тепло на его языке: поздоровайся или ответь на благодарность и спроси, чем можешь помочь. ' +
   'Ничего не говори о товарах, ценах, наличии и доставке. Верни confidence 100 и needs_human = false.';
+
+/**
+ * Возврат, обмен, брак, претензия — решает человек. Бот здесь только вредит:
+ * пообещает лишнее или, как было, ответит «чем могу помочь?».
+ */
+export const MANAGER_ONLY_Q = /возврат|вернуть|верните|обмен|обменя|поменять|брак|претензи|не подош|не подход|қайтар|ауыстыр|алмастыр|сәйкес кел|сай кел|үлкен бол|кіші бол|улкен бол|киши бол|үлкен боп|кіші боп|ақау|акау|жыртыл/i;
+
+/** Казахские буквы — точно казахский, даже если половина слов русские («41 размер бірақ үлкен»). */
+const KK_LETTERS = /[әғқңөұүһі]/i;
+export function clientLang(text: string, guess?: 'ru' | 'kk'): 'ru' | 'kk' | undefined {
+  return KK_LETTERS.test(text) ? 'kk' : guess;
+}
 
 /** Вопрос о своём заказе: «где моя посылка», «когда отправите», «тапсырысым қайда». */
 export const ORDER_STATUS_Q = /заказ|посылк|трек|отправ|доставк|придёт|придет|где мо[йяиё]|тапсырыс|сәлемдеме|посылка|жеткіз|жіберд|қашан кел|почт/i;
@@ -150,6 +164,10 @@ export async function answerQuestion(params: {
       understanding: u, partner: { lang: u.lang },
     };
   }
+
+  // Возврат, обмен, брак: условия из базы бот назовёт, но решает менеджер —
+  // после ответа диалог всё равно уходит человеку.
+  const managerOnly = MANAGER_ONLY_Q.test(params.question);
 
   // ── 2. Склад ───────────────────────────────────────────────
   let catalog: Catalog | null = null;
@@ -226,7 +244,7 @@ export async function answerQuestion(params: {
     ? params.orders.trim() : '';
 
   // Хочет купить, а базе нечего сказать — уточняем модель, размер, город.
-  if (order && relevant.length === 0 && !stock && !ordersCtx) return orderResult({ input: 0, output: 0, embed: embedTokens });
+  if (order && !managerOnly && relevant.length === 0 && !stock && !ordersCtx) return orderResult({ input: 0, output: 0, embed: embedTokens });
 
   // Ни базы, ни склада — до модели даже не идём: дешевле и честнее.
   if (relevant.length === 0 && !stock && !ordersCtx) {
@@ -241,6 +259,7 @@ export async function answerQuestion(params: {
       ai: choice,
       understanding: u,
       catalog: catalogInfo,
+      managerOnly,
     };
   }
 
@@ -264,7 +283,9 @@ export async function answerQuestion(params: {
       ...history,
       {
         role: 'user',
-        content: `${context}\n\n---\n\n${dialogNote(history, params.question, u?.lang)}Вопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}${
+        content: `${context}\n\n---\n\n${dialogNote(history, params.question, clientLang(params.question.split('\n').at(-1) ?? params.question, u?.lang))}Вопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}${
+          managerOnly ? '\n(Это вопрос о возврате, обмене или браке: коротко ответь по базе знаний и скажи, что менеджер сейчас подключится. Не обещай, что возврат или обмен одобрят. Нет условий в базе — needs_human = true.)' : ''
+        }${
           order ? `\n(Клиент хочет купить. Если в базе есть ответ на это — ответь по нему; в конце спроси, чего не хватает для заказа: ${order.missing.map((f) => ({ model: 'модель', size: 'размер', city: 'город или самовывоз' })[f]).join(', ')}.)` : ''
         }`,
       },
@@ -287,7 +308,7 @@ export async function answerQuestion(params: {
 
   const needsHuman = parsed.needsHuman || confidence < params.config.confidenceThreshold;
   // База не помогла — для покупателя лучше уточнить заказ, чем звать менеджера.
-  if (order && (needsHuman || !parsed.answer)) return orderResult({ input: result.inputTokens, output: result.outputTokens, embed: embedTokens });
+  if (order && !managerOnly && (needsHuman || !parsed.answer)) return orderResult({ input: result.inputTokens, output: result.outputTokens, embed: embedTokens });
 
   return {
     answer: parsed.answer,
@@ -301,6 +322,7 @@ export async function answerQuestion(params: {
     understanding: u,
     catalog: catalogInfo,
     photos,
+    managerOnly,
   };
 }
 

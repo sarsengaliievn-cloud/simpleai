@@ -58,3 +58,16 @@ describe('приветствие + вопрос', () => {
     expect(dialogNote([], 'Астанаға доставка барма', 'kk')).toContain('по-казахски');
   });
 });
+
+import { MANAGER_ONLY_Q, clientLang } from './ai/rag.js';
+describe('возврат и язык', () => {
+  it('возврат, обмен, брак — менеджеру', () => {
+    for (const q of ['Возврат жасауға болама размері үлкен болып тұр', '41 размер бірақ прям үлкен болып тұр', 'можно обменять на 42?', 'Аяқ киімді қайтаруға бола ма', 'подошва отклеилась, брак']) expect(MANAGER_ONLY_Q.test(q)).toBe(true);
+    for (const q of ['Канша багасы', 'Астанаға доставка барма', '42 размер есть?', 'Каталог жіберіңізші']) expect(MANAGER_ONLY_Q.test(q)).toBe(false);
+  });
+  it('казахские буквы — казахский', () => {
+    expect(clientLang('41 размер бірақ прям үлкен', 'ru')).toBe('kk');
+    expect(clientLang('Канша багасы', 'kk')).toBe('kk');
+    expect(clientLang('Сколько стоит', 'ru')).toBe('ru');
+  });
+});
