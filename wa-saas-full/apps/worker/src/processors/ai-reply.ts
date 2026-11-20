@@ -1,6 +1,7 @@
 import { prisma, forCompany } from '@wa/db';
 import {
   answerQuestion,
+  handoffAck,
   funnelAskBlock,
   isWindowOpen,
   isWithinWorkingHours,
@@ -94,9 +95,14 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     return;
   }
 
+  // Что клиент писал последним — по этому выбираем язык и обращение
+  // в коротком «передаю менеджеру».
+  const clientSample = ordered.filter((m) => m.direction === 'INBOUND').slice(-5).map((m) => m.text ?? '').join('\n');
+
   // ── Баланс ИИ ──────────────────────────────
   // Денег нет — бот не отвечает, клиент уходит к людям. Пометка одна на диалог.
   if (!(await hasBalance(companyId))) {
+    await ackHandOff(db, conversationId, clientSample);
     await handOff(db, conversationId, 'Баланс ИИ закончился — бот передал диалог менеджеру. Пополните баланс в разделе «Баланс».', { billing: 'empty' });
     console.log(`[ai] ${conversationId}: баланс ИИ исчерпан — передано менеджеру`);
     return;
@@ -141,6 +147,7 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
   const attachment = tail.find(blind);
   if (attachment) {
     const what = attachment.type;
+    await ackHandOff(db, conversationId, clientSample);
     await handOff(db, conversationId, ATTACHMENT_REASON[what] ?? 'Клиент прислал вложение', { attachment: what });
     console.log(`[ai] ${conversationId}: вложение ${what} — передано менеджеру`);
     return;
@@ -212,6 +219,8 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
   }
 
   if (result.needsHuman || !result.answer) {
+    // Клиент не должен ждать в тишине: коротко — «понял, передаю менеджеру».
+    await ackHandOff(db, conversationId, clientSample, result.understanding?.lang, after);
     await handOff(
       db,
       conversationId,
@@ -468,6 +477,19 @@ async function newerInbound(db: Db, conversationId: string, after: Date) {
   return !!newer;
 }
 
+/**
+ * «Понял вас! Передаю менеджеру» — перед тем как отдать диалог человеку.
+ * Один раз на передачу: после handOff диалог у людей и бот больше не пишет.
+ * Менеджер уже в чате или клиент дописал — не шлём.
+ */
+async function ackHandOff(db: Db, conversationId: string, sample: string, guess?: 'ru' | 'kk', after?: Date) {
+  try {
+    await sendAsAssistant(db, conversationId, handoffAck(sample, guess), { handoffAck: true }, after);
+  } catch (error) {
+    console.warn(`[ai] ${conversationId}: «передаю менеджеру» не ушло —`, (error as Error).message);
+  }
+}
+
 /** Диалог — менеджеру, с понятной пометкой в ленте. Повторно не помечаем. */
 async function handOff(db: Db, conversationId: string, text: string, metadata: Record<string, unknown>) {
   const { count } = await db.conversation.updateMany({
@@ -574,6 +596,10 @@ export async function aiReplyFailed({ companyId, conversationId }: AiReplyJob, e
   const config = await db.aIConfiguration.findFirst();
   const reason = aiErrorReason(error.message, config?.aiModel ?? null);
   await db.aIConfiguration.updateMany({ data: { lastErrorAt: new Date(), lastError: reason } });
+  const recent = await db.message.findMany({
+    where: { conversationId, direction: 'INBOUND' }, orderBy: { createdAt: 'desc' }, take: 5, select: { text: true },
+  });
+  await ackHandOff(db, conversationId, recent.map((m) => m.text ?? '').reverse().join('\n'));
   await handOff(db, conversationId, `Ассистент не смог ответить: ${reason}. Диалог передан менеджеру.`, { aiError: reason });
   console.error(`[ai] ${conversationId}: сбой ИИ после повторов (${reason}) — передано менеджеру`);
 }
