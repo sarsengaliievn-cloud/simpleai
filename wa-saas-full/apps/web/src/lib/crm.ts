@@ -1,7 +1,7 @@
 import type { TenantClient } from '@wa/db';
 import { ensureStages, sourceLabel } from '@wa/core';
 
-export type StageView = { id: string; name: string; kind: 'NEW' | 'WORK' | 'ORDER' | 'WON' | 'LOST'; aiHint?: string | null };
+export type StageView = { id: string; name: string; kind: 'NEW' | 'WORK' | 'ORDER' | 'WON' | 'LOST'; aiHint?: string | null; aiAsk?: string | null };
 export type MemberView = { id: string; name: string };
 export type DealView = {
   id: string;
@@ -33,7 +33,7 @@ const fullName = (u: { firstName: string; lastName: string } | null | undefined)
 
 export async function loadStages(db: TenantClient): Promise<StageView[]> {
   const stages = await ensureStages(db);
-  return stages.map((s) => ({ id: s.id, name: s.name, kind: s.kind as StageView['kind'], aiHint: s.aiHint }));
+  return stages.map((s) => ({ id: s.id, name: s.name, kind: s.kind as StageView['kind'], aiHint: s.aiHint, aiAsk: s.aiAsk }));
 }
 
 /** Команда для выбора «передать менеджеру». */

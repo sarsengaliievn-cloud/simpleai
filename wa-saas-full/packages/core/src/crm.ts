@@ -259,7 +259,7 @@ export async function assignDeal(
 
 /* ── Этапы: тип, порядок, удаление ─────────────────────────── */
 
-export type StageDraft = { id?: string | null; name: string; kind: StageKind; aiHint?: string | null };
+export type StageDraft = { id?: string | null; name: string; kind: StageKind; aiHint?: string | null; aiAsk?: string | null };
 
 const MAX_STAGES = 12;
 
@@ -316,7 +316,7 @@ export async function saveStages(db: TenantClient, draft: StageDraft[]) {
   const current = await ensureStages(db);
   const newStage = current.find((s) => s.kind === 'NEW') ?? null;
   const known = new Set(current.map((s) => s.id));
-  const clean = draft.map((s) => ({ id: s.id && known.has(s.id) ? s.id : null, name: s.name.trim(), kind: s.kind, aiHint: s.aiHint?.trim().slice(0, 300) || null }));
+  const clean = draft.map((s) => ({ id: s.id && known.has(s.id) ? s.id : null, name: s.name.trim(), kind: s.kind, aiHint: s.aiHint?.trim().slice(0, 300) || null, aiAsk: s.aiAsk?.trim().slice(0, 200) || null }));
   const problem = stagesProblem(clean, newStage?.id ?? null);
   if (problem) throw new CrmError(problem);
 
@@ -326,11 +326,11 @@ export async function saveStages(db: TenantClient, draft: StageDraft[]) {
   for (const [position, s] of clean.entries()) {
     if (s.id) {
       const before = current.find((c) => c.id === s.id)!;
-      await db.pipelineStage.updateMany({ where: { id: s.id }, data: { name: s.name, kind: s.kind, position, aiHint: s.aiHint } });
+      await db.pipelineStage.updateMany({ where: { id: s.id }, data: { name: s.name, kind: s.kind, position, aiHint: s.aiHint, aiAsk: s.aiAsk } });
       if (before.kind !== s.kind) changedKind.push({ id: s.id, kind: s.kind });
       ids.push(s.id);
     } else {
-      const created = await db.pipelineStage.create({ data: { name: s.name, kind: s.kind, position, aiHint: s.aiHint } as never });
+      const created = await db.pipelineStage.create({ data: { name: s.name, kind: s.kind, position, aiHint: s.aiHint, aiAsk: s.aiAsk } as never });
       ids.push(created.id);
     }
   }

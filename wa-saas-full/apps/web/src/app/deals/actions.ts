@@ -119,7 +119,7 @@ export async function saveStagesAction(draft: StageDraft[]): Promise<DealResult>
   const kinds = new Set(['NEW', 'WORK', 'ORDER', 'WON', 'LOST']);
   const clean = draft
     .filter((s) => s && typeof s.name === 'string' && kinds.has(s.kind))
-    .map((s) => ({ id: typeof s.id === 'string' ? s.id : null, name: s.name.slice(0, 60), kind: s.kind, aiHint: typeof s.aiHint === 'string' ? s.aiHint.slice(0, 300) : null }));
+    .map((s) => ({ id: typeof s.id === 'string' ? s.id : null, name: s.name.slice(0, 60), kind: s.kind, aiHint: typeof s.aiHint === 'string' ? s.aiHint.slice(0, 300) : null, aiAsk: typeof s.aiAsk === 'string' ? s.aiAsk.slice(0, 200) : null }));
   try {
     await saveStages(ctx.db, clean);
   } catch (error) {

@@ -74,3 +74,21 @@ describe('ИИ и этапы: ответ модели', () => {
     expect(r.usage.inputTokens).toBe(300);
   });
 });
+
+import { funnelAskBlock, defaultStageAsk } from './stage-ai.js';
+describe('бот спрашивает, чтобы двигать клиента', () => {
+  it('после адреса — «придёте в магазин?», после каталога — какая модель', () => {
+    expect(defaultStageAsk('Уточнял график работы', 'WORK')).toMatch(/Придёте/);
+    expect(defaultStageAsk('отправлен каталог', 'WORK')).toMatch(/модель/);
+    expect(defaultStageAsk('Думает', 'WORK')).toBe('');
+    const b = funnelAskBlock(SHOQAI);
+    expect(b).toMatch(/адрес магазина.*Придёте к нам в магазин/);
+    expect(b).not.toMatch(/Продажа/);
+  });
+  it('свой вопрос и «-»', () => {
+    const custom = SHOQAI.map((s) => (s.id === 's2' ? { ...s, aiAsk: '-' } : s.id === 's9' ? { ...s, aiAsk: 'В какой день вас ждать?' } : s));
+    const b = funnelAskBlock(custom);
+    expect(b).not.toMatch(/Придёте к нам/);
+    expect(b).toMatch(/В какой день вас ждать/);
+  });
+});

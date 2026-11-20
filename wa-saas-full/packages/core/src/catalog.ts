@@ -10,7 +10,7 @@ import { isIP } from 'node:net';
  * наружу не отдаются, только «есть / последняя пара».
  */
 
-export type CatalogStore = { id: string; name: string; city: string; address: string; warehouse: boolean };
+export type CatalogStore = { id: string; name: string; city: string; address: string; warehouse: boolean; phone?: string };
 export type CatalogItem = {
   id: string;
   article: string;
@@ -151,7 +151,7 @@ export function normalizeCatalog(raw: unknown): Catalog {
   const data = (raw ?? {}) as { stores?: unknown[]; items?: unknown[] };
   const stores = (Array.isArray(data.stores) ? data.stores : []).slice(0, 200).map((s) => {
     const o = (s ?? {}) as Record<string, unknown>;
-    return { id: str(o.id, 80), name: str(o.name, 120), city: str(o.city, 80), address: str(o.address, 200), warehouse: !!o.warehouse };
+    return { id: str(o.id, 80), name: str(o.name, 120), city: str(o.city, 80), address: str(o.address, 200), warehouse: !!o.warehouse, phone: str(o.phone, 40) };
   }).filter((s) => s.id);
   const items = (Array.isArray(data.items) ? data.items : []).slice(0, 20000).map((it) => {
     const o = (it ?? {}) as Record<string, unknown>;
@@ -453,6 +453,22 @@ export function catalogBlock(catalog: Catalog, match: CatalogMatch, source: Cata
 export function storesLine(catalog: Catalog) {
   const shops = catalog.stores.filter((s) => !s.warehouse);
   return shops.length ? `Магазины: ${shops.map(storeLabel).join('; ')}.` : '';
+}
+
+/**
+ * Адреса магазинов для вопроса «где вы находитесь?» — по городам, с телефонами.
+ * Склад (warehouse) клиенту не показываем: туда не приходят.
+ */
+export function storesInfo(catalog: Catalog) {
+  const shops = catalog.stores.filter((s) => !s.warehouse && (s.address || s.name));
+  if (!shops.length) return '';
+  const byCity = new Map<string, string[]>();
+  for (const s of shops) {
+    const city = s.city || '';
+    const line = [s.address || s.name, s.address && s.name && !s.address.includes(s.name) ? `(${s.name})` : '', s.phone ? `тел. ${s.phone}` : ''].filter(Boolean).join(' ');
+    byCity.set(city, [...(byCity.get(city) ?? []), line]);
+  }
+  return `МАГАЗИНЫ (данные склада, точные):\n${[...byCity].map(([city, list]) => `${city ? `${city}: ` : ''}${list.join('; ')}`).join('\n')}`;
 }
 
 /** Для тестов: сбросить кэш. */

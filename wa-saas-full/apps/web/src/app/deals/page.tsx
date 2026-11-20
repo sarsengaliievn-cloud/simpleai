@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { can, isStale, lostReasonsOf, onShiftNow, defaultStageHint, skladStageIds, resolvePeriod, type StageKind } from '@wa/core';
+import { can, isStale, lostReasonsOf, onShiftNow, defaultStageHint, defaultStageAsk, skladStageIds, resolvePeriod, type StageKind } from '@wa/core';
 import { requireCompany } from '@/lib/session';
 import { Shell } from '@/components/Shell';
 import { Kanban, type KanbanCard } from '@/components/crm/Kanban';
@@ -159,7 +159,7 @@ export default async function DealsPage({ searchParams }: Props) {
       <div className={`page deals-page ${editStages && canEditStages ? '' : 'deals-fit'}`}>
         {editStages && canEditStages && (
           <StageEditor
-            key={stages.map((s) => s.id + s.name + s.kind + (s.aiHint ?? '')).join('|')}
+            key={stages.map((s) => s.id + s.name + s.kind + (s.aiHint ?? '') + (s.aiAsk ?? '')).join('|')}
             stages={stages}
             counts={counts}
             lostReasons={lostReasons}
@@ -168,6 +168,7 @@ export default async function DealsPage({ searchParams }: Props) {
               enabled: company.aiStages,
               days: company.noAnswerDays,
               defaults: Object.fromEntries(stages.map((s) => [s.id, defaultStageHint(s.name, s.kind)])),
+              asks: Object.fromEntries(stages.map((s) => [s.id, defaultStageAsk(s.name, s.kind)])),
               sklad: [...skladStageIds(stages.map((s, position) => ({ ...s, position })), company.orderStageMap)],
             }}
           />

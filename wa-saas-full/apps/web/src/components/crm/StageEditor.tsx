@@ -5,7 +5,7 @@ import { saveStagesAction, saveLostReasonsAction, saveAiStagesAction, type DealR
 import type { StageView } from '@/lib/crm';
 
 type Kind = StageView['kind'];
-type Row = { key: string; id: string | null; name: string; kind: Kind; aiHint: string };
+type Row = { key: string; id: string | null; name: string; kind: Kind; aiHint: string; aiAsk: string };
 
 const KIND_LABEL: Record<Exclude<Kind, 'NEW'>, string> = {
   WORK: 'В работе',
@@ -36,15 +36,15 @@ export function StageEditor({
   /** Причины свои (а не стандартные). */
   customReasons: boolean;
   /** ИИ ведёт воронку: включено ли, «нет ответа» через сколько дней, подсказки по названиям, этапы склада. */
-  ai: { enabled: boolean; days: number; defaults: Record<string, string>; sklad: string[] };
+  ai: { enabled: boolean; days: number; defaults: Record<string, string>; asks: Record<string, string>; sklad: string[] };
 }) {
-  const initial = useMemo<Row[]>(() => stages.map((s) => ({ key: s.id, id: s.id, name: s.name, kind: s.kind, aiHint: s.aiHint ?? '' })), [stages]);
+  const initial = useMemo<Row[]>(() => stages.map((s) => ({ key: s.id, id: s.id, name: s.name, kind: s.kind, aiHint: s.aiHint ?? '', aiAsk: s.aiAsk ?? '' })), [stages]);
   const [rows, setRows] = useState<Row[]>(initial);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  const dirty = JSON.stringify(rows.map(({ id, name, kind, aiHint }) => [id, name.trim(), kind, aiHint.trim()])) !== JSON.stringify(initial.map(({ id, name, kind, aiHint }) => [id, name, kind, aiHint]));
+  const dirty = JSON.stringify(rows.map(({ id, name, kind, aiHint, aiAsk }) => [id, name.trim(), kind, aiHint.trim(), aiAsk.trim()])) !== JSON.stringify(initial.map(({ id, name, kind, aiHint, aiAsk }) => [id, name, kind, aiHint, aiAsk]));
 
   const run = (fn: () => Promise<DealResult>, ok: string) => {
     setError(null);
@@ -111,7 +111,7 @@ export function StageEditor({
                   ))}
                 </select>
               )}
-              <StageHint row={r} isNew={isNew} ai={ai} onChange={(aiHint) => patch(r.key, { aiHint })} />
+              <StageHint row={r} isNew={isNew} ai={ai} onChange={(aiHint) => patch(r.key, { aiHint })} onAsk={(aiAsk) => patch(r.key, { aiAsk })} />
               <span className="row stage-tools" style={{ gap: 2 }}>
                 {r.id && counts[r.id] ? <span className="tiny muted" title="Сделок на этапе">{counts[r.id]}</span> : null}
                 {!isNew && (
@@ -136,7 +136,7 @@ export function StageEditor({
             seq += 1;
             // Новый этап — перед первым конечным, чтобы не оказаться после «Купил».
             const at = rows.findIndex((r, idx) => idx > 0 && (r.kind === 'ORDER' || r.kind === 'WON' || r.kind === 'LOST'));
-            const row: Row = { key: `new-${seq}`, id: null, name: '', kind: 'WORK', aiHint: '' };
+            const row: Row = { key: `new-${seq}`, id: null, name: '', kind: 'WORK', aiHint: '', aiAsk: '' };
             setRows((list) => (at < 0 ? [...list, row] : [...list.slice(0, at), row, ...list.slice(at)]));
           }}
         >
@@ -152,7 +152,7 @@ export function StageEditor({
           type="button"
           className="btn btn-primary btn-sm"
           disabled={pending || !dirty}
-          onClick={() => run(() => saveStagesAction(rows.map(({ id, name, kind, aiHint }) => ({ id, name, kind, aiHint }))), 'Этапы сохранены')}
+          onClick={() => run(() => saveStagesAction(rows.map(({ id, name, kind, aiHint, aiAsk }) => ({ id, name, kind, aiHint, aiAsk }))), 'Этапы сохранены')}
         >
           {pending ? 'Сохраняю…' : 'Сохранить этапы'}
         </button>
@@ -169,29 +169,45 @@ export function StageEditor({
 }
 
 /** «Когда ставить» — подсказка ИИ под строкой этапа. */
-function StageHint({ row, isNew, ai, onChange }: { row: Row; isNew: boolean; ai: { enabled: boolean; defaults: Record<string, string>; sklad: string[] }; onChange: (v: string) => void }) {
+function StageHint({ row, isNew, ai, onChange, onAsk }: { row: Row; isNew: boolean; ai: { enabled: boolean; defaults: Record<string, string>; asks: Record<string, string>; sklad: string[] }; onChange: (v: string) => void; onAsk: (v: string) => void }) {
   if (!ai.enabled) return null;
   const fixed = isNew ? 'ИИ сюда не ставит — здесь каждый новый клиент'
     : row.kind === 'ORDER' || row.kind === 'WON' ? 'ИИ не ставит — продажи отмечают люди или склад'
     : row.id && ai.sklad.includes(row.id) ? 'ставит склад, когда заказ оплачен или отправлен'
     : null;
   const def = (row.id && ai.defaults[row.id]) || '';
+  const ask = (row.id && ai.asks[row.id]) || '';
   return (
-    <div className="stage-hint">
-      <span className="tiny muted">ИИ ставит, когда:</span>
-      {fixed ? (
-        <span className="tiny muted">{fixed}</span>
-      ) : (
-        <input
-          className="input"
-          value={row.aiHint}
-          maxLength={300}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={def === '-' ? 'не ставит (ставится при передаче менеджеру)' : def || 'по названию этапа — опишите своими словами'}
-          aria-label={`Когда ИИ ставит этап ${row.name}`}
-        />
+    <>
+      <div className="stage-hint">
+        <span className="tiny muted">ИИ ставит, когда:</span>
+        {fixed ? (
+          <span className="tiny muted">{fixed}</span>
+        ) : (
+          <input
+            className="input"
+            value={row.aiHint}
+            maxLength={300}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={def === '-' ? 'не ставит (ставится при передаче менеджеру)' : def || 'по названию этапа — опишите своими словами'}
+            aria-label={`Когда ИИ ставит этап ${row.name}`}
+          />
+        )}
+      </div>
+      {!fixed && row.kind === 'WORK' && (
+        <div className="stage-hint">
+          <span className="tiny muted">Бот спрашивает:</span>
+          <input
+            className="input"
+            value={row.aiAsk}
+            maxLength={200}
+            onChange={(e) => onAsk(e.target.value)}
+            placeholder={ask || 'ничего — или вопрос, ответ на который двигает клиента дальше'}
+            aria-label={`Что бот спрашивает на этапе ${row.name}`}
+          />
+        </div>
       )}
-    </div>
+    </>
   );
 }
 

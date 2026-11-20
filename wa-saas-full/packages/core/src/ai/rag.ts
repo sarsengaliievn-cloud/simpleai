@@ -5,7 +5,7 @@ import { buildSystemPrompt, type AIConfigLike } from './prompt.js';
 import type { ChatMessage } from './provider.js';
 import { understandMessage, type Understanding } from './understand.js';
 import {
-  loadCatalog, searchCatalog, catalogBlock, storesLine, sizeAvailability, photoLink, productLink, shownProductIds,
+  loadCatalog, searchCatalog, catalogBlock, storesLine, storesInfo, sizeAvailability, photoLink, productLink, shownProductIds,
   type Catalog, type CatalogMatch, type CatalogSource,
 } from '../catalog.js';
 
@@ -99,6 +99,12 @@ export function clientLang(text: string, guess?: 'ru' | 'kk'): 'ru' | 'kk' | und
   return KK_LETTERS.test(text) ? 'kk' : guess;
 }
 
+/**
+ * Где магазин и когда работает: «адрес қандай», «қайда орналасқансыздар»,
+ * «где вы находитесь», «до скольки работаете», «жұмыс уақыты».
+ */
+export const ADDRESS_Q = /адрес|мекен\s*-?\s*жай|қайда|кайда|где\s+(вы|ваш|наход|магазин|бутик|можно\s+(посмотр|пример|купит))|доехать|добраться|проехать|как\s+(вас\s+)?найти|локаци|геолок|2\s?гис|2gis|филиал|точк[аи]\s+продаж|оффлайн|офлайн|дүкен(дер)?(іңіз|іңіздер)?\s*(қайда|бар\s*ма)|график|режим\s+работ|час(ы|ов)\s+работ|во\s+сколько\s+(открыв|закрыв|работ)|до\s+скольк|с\s+скольк|открыт[ыо]|жұмыс\s+(уақыт|кесте)|жумыс\s+уакыт|нешеге\s+дейін|қаншаға\s+дейін|сағат\s+неше/i;
+
 /** Вопрос о своём заказе: «где моя посылка», «когда отправите», «тапсырысым қайда». */
 export const ORDER_STATUS_Q = /заказ|посылк|трек|отправ|доставк|придёт|придет|где мо[йяиё]|тапсырыс|сәлемдеме|посылка|жеткіз|жіберд|қашан кел|почт/i;
 
@@ -112,6 +118,8 @@ export async function answerQuestion(params: {
   catalog?: CatalogSource | null;
   /** Заказы клиента из склада (shopOrdersBlock) — для вопросов «где мой заказ». */
   orders?: string | null;
+  /** Вопросы воронки: что спросить клиента после ответа (funnelAskBlock). */
+  funnel?: string | null;
 }): Promise<AnswerResult> {
   const choice = resolveAI(params.config);
   const ai = getAIFor(choice);
@@ -178,6 +186,15 @@ export async function answerQuestion(params: {
   const linksModel = /#p=|артикул|\bарт\.?\s*[\w-]{2,}/i.test(params.question)
     || (!!params.catalog?.productUrl && params.catalog.productUrl.includes('{id}') && params.question.includes(params.catalog.productUrl.split('{id}')[0]!));
   const wantsCatalog = linksModel || (!!u && (['stock', 'pick', 'buy'].includes(u.intent) || !!u.article || !!u.model || !!u.size || !!u.kind));
+  // «Адрес қандай?» — адреса магазинов берём со склада, а не ждём базу знаний.
+  // «Тапсырысым қайда?» — это про заказ, а не про адрес магазина.
+  const aboutOrder = ORDER_STATUS_Q.test(params.question) && !/адрес|мекен|дүкен|магазин|бутик|график|жұмыс|работа/i.test(params.question);
+  const wantsStores = !aboutOrder && ADDRESS_Q.test(`${params.question}\n${query}`);
+  let storesCtx = '';
+  if (params.catalog?.url && wantsStores && !wantsCatalog) {
+    try { storesCtx = storesInfo(await loadCatalog(params.catalog)); }
+    catch (error) { console.warn('[ai] адреса со склада недоступны:', (error as Error).message.slice(0, 200)); }
+  }
   if (params.catalog?.url && wantsCatalog) {
     try {
       catalog = await loadCatalog(params.catalog);
@@ -238,16 +255,17 @@ export async function answerQuestion(params: {
   const stock = catalog && match && match.mode !== 'none' && params.catalog
     ? [catalogBlock(catalog, match, params.catalog), storesLine(catalog)].filter(Boolean).join('\n\n')
     : '';
+  if (wantsStores && catalog && !storesCtx) storesCtx = storesInfo(catalog);
 
   // Спрашивает про свой заказ — отвечаем по данным склада, без менеджера.
   const ordersCtx = params.orders?.trim() && u?.intent !== 'buy' && ORDER_STATUS_Q.test(`${params.question}\n${query}`)
     ? params.orders.trim() : '';
 
   // Хочет купить, а базе нечего сказать — уточняем модель, размер, город.
-  if (order && !managerOnly && relevant.length === 0 && !stock && !ordersCtx) return orderResult({ input: 0, output: 0, embed: embedTokens });
+  if (order && !managerOnly && relevant.length === 0 && !stock && !ordersCtx && !storesCtx) return orderResult({ input: 0, output: 0, embed: embedTokens });
 
   // Ни базы, ни склада — до модели даже не идём: дешевле и честнее.
-  if (relevant.length === 0 && !stock && !ordersCtx) {
+  if (relevant.length === 0 && !stock && !ordersCtx && !storesCtx) {
     return {
       answer: '',
       confidence: 0,
@@ -269,6 +287,10 @@ export async function answerQuestion(params: {
     ordersCtx
       ? `${ordersCtx}\n\nНа вопросы клиента о его заказе (статус, отправка, трек) отвечай только по блоку ЗАКАЗЫ. Сроков доставки, которых там нет, не обещай. Есть трек — дай его и ссылку для отслеживания.`
       : '',
+    storesCtx
+      ? `${storesCtx}\n\nНа вопрос, где магазин, назови адреса из блока МАГАЗИНЫ — сначала в городе клиента, если он известен. График работы называй, только если он есть во фрагментах базы знаний. ` +
+        'В конце задай ОДИН вопрос: в какой магазин и когда клиенту удобно подойти (по-казахски: «Қай дүкенге, қашан келе аласыз?») — чтобы понять, придёт ли он. Если он уже сказал, что придёт, — не спрашивай, а скажи, что ждём.'
+      : '',
     stock
       ? `${stock}\n\nНаличие, размеры и цены бери только из блока КАТАЛОГ — это данные склада на сейчас, они важнее базы знаний. Называя модель, добавь её ссылку из каталога. Точное количество пар не называй.`
       : '',
@@ -284,6 +306,8 @@ export async function answerQuestion(params: {
       {
         role: 'user',
         content: `${context}\n\n---\n\n${dialogNote(history, params.question, clientLang(params.question.split('\n').at(-1) ?? params.question, u?.lang))}Вопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}${
+          params.funnel && !managerOnly && !order && !storesCtx ? `\n\n${params.funnel}` : ''
+        }${
           managerOnly ? '\n(Это вопрос о возврате, обмене или браке: коротко ответь по базе знаний и скажи, что менеджер сейчас подключится. Не обещай, что возврат или обмен одобрят. Нет условий в базе — needs_human = true.)' : ''
         }${
           order ? `\n(Клиент хочет купить. Если в базе есть ответ на это — ответь по нему; в конце спроси, чего не хватает для заказа: ${order.missing.map((f) => ({ model: 'модель', size: 'размер', city: 'город или самовывоз' })[f]).join(', ')}.)` : ''
@@ -297,7 +321,7 @@ export async function answerQuestion(params: {
   // Модель склонна завышать уверенность в себе, поэтому итог ограничиваем
   // качеством найденных фрагментов: нет опоры в базе — нет высокой оценки.
   // Ответ по данным склада опирается на каталог, а не на базу знаний.
-  const confidence = stock || ordersCtx ? parsed.confidence : Math.min(parsed.confidence, Math.round(topScore * 100));
+  const confidence = stock || ordersCtx || storesCtx ? parsed.confidence : Math.min(parsed.confidence, Math.round(topScore * 100));
 
   const photos = match?.mode === 'pick' && params.catalog?.photoUrl
     ? match.items.slice(0, 3).map((i) => ({

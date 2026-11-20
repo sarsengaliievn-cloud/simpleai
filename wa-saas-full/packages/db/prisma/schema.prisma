@@ -568,6 +568,8 @@ model PipelineStage {
   kind      StageKind
   /// Подсказка ИИ: когда ставить клиента на этот этап. «-» — ИИ этот этап не ставит.
   aiHint    String?
+  /// Что бот спрашивает клиента на этом шаге, чтобы понять, идёт ли он дальше. «-» — ничего.
+  aiAsk     String?
   position  Int
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

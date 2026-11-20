@@ -1,6 +1,7 @@
 import { prisma, forCompany } from '@wa/db';
 import {
   answerQuestion,
+  funnelAskBlock,
   isWindowOpen,
   isWithinWorkingHours,
   splitReply,
@@ -155,7 +156,10 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
     orderBy: { orderedAt: 'desc' }, take: 3,
   });
   const orders = shopOrdersBlock(shopOrders);
-  const result = await answerQuestion({ companyId, company, config, question, history, catalog, orders });
+  // Воронка: после ответа бот задаёт вопрос, который двигает клиента дальше
+  // («Придёте в магазин?»), а ИИ-этапы потом ставят сделку по его ответу.
+  const funnel = company.aiStages ? funnelAskBlock(await db.pipelineStage.findMany({ orderBy: { position: 'asc' } }), company.orderStageMap) : null;
+  const result = await answerQuestion({ companyId, company, config, question, history, catalog, orders, funnel });
   // ИИ снова отвечает — плашка «ИИ не работает» больше не нужна.
   if (config.lastErrorAt) {
     await db.aIConfiguration.updateMany({ data: { lastErrorAt: null, lastError: null } });
