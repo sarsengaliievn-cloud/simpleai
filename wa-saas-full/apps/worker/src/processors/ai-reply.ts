@@ -72,6 +72,14 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
   // только задача последнего сообщения: к её запуску серия уже закончилась.
   if (last.id !== inboundMessageId) return;
 
+  // Менеджер недавно писал сам (из панели или с телефона) — он в разговоре.
+  // Бот не встревает, пока человек молчит меньше MANAGER_PAUSE_MIN минут.
+  const managerAt = conversation.messages.find((m) => m.direction === 'OUTBOUND' && m.authorType === 'MANAGER')?.createdAt;
+  if (managerAt && Date.now() - managerAt.getTime() < MANAGER_PAUSE_MS) {
+    console.log(`[ai] ${conversationId}: менеджер в разговоре — бот молчит`);
+    return;
+  }
+
   // Сообщения клиента, идущие подряд в конце, — это один вопрос.
   let tailStart = ordered.length;
   while (tailStart > 0 && ordered[tailStart - 1]!.direction === 'INBOUND') tailStart -= 1;
@@ -208,7 +216,7 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
       db,
       conversationId,
       result.managerOnly
-        ? 'Ассистент передал диалог менеджеру: возврат, обмен или брак — решает менеджер'
+        ? 'Ассистент передал диалог менеджеру: возврат, обмен, брак или оплата — решает менеджер'
         : result.confidence === 0 && result.topScore === 0
         ? 'Ассистент передал диалог менеджеру: в базе знаний нет ответа на этот вопрос'
         : `Ассистент передал диалог менеджеру: уверенность ${result.confidence}% при пороге ${config.confidenceThreshold}%`,
@@ -263,7 +271,7 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
 
   // Возврат, обмен, брак: условия бот назвал, а решение — за менеджером.
   if (result.managerOnly && sentCount > 0) {
-    await handOff(db, conversationId, 'Возврат, обмен или брак: ассистент назвал условия из базы, решение — за менеджером', { topScore: result.topScore });
+    await handOff(db, conversationId, 'Возврат, обмен, брак или оплата: ассистент ответил клиенту, дальше — менеджер', { topScore: result.topScore });
     console.log(`[ai] ${conversationId}: возврат/обмен — ответ отправлен и передано менеджеру`);
     return;
   }
@@ -441,10 +449,20 @@ async function sendAsAssistant(
   return 'sent';
 }
 
-/** Клиент написал что-то после `after` — значит, на это ответит более свежая задача. */
+/** Сколько бот молчит после сообщения менеджера. */
+const MANAGER_PAUSE_MS = (Number(process.env.MANAGER_PAUSE_MIN) || 30) * 60_000;
+
+/**
+ * Пока бот думал, разговор ушёл вперёд: клиент дописал (ответит более свежая
+ * задача) или ответил менеджер (тогда бот не встревает вовсе).
+ */
 async function newerInbound(db: Db, conversationId: string, after: Date) {
   const newer = await db.message.findFirst({
-    where: { conversationId, direction: 'INBOUND', createdAt: { gt: after } },
+    where: {
+      conversationId,
+      createdAt: { gt: after },
+      OR: [{ direction: 'INBOUND' }, { direction: 'OUTBOUND', authorType: 'MANAGER' }],
+    },
     select: { id: true },
   });
   return !!newer;
