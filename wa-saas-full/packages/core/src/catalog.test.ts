@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { normalizeCatalog, searchCatalog, catalogBlock, describeItem, normSize, assertPublicUrl, shownProductIds, kindStems } from './catalog.js';
 import { parseUnderstanding } from './ai/understand.js';
 import { draftOrder, orderQuestion, orderConfirmation } from './ai/rag.js';
+import { emptyLead, mergeLead, leadFromUnderstanding } from './lead.js';
 
 const raw = JSON.parse(readFileSync(new URL('./__fixtures__/catalog.json', import.meta.url), 'utf8'));
 const catalog = normalizeCatalog(raw);
@@ -74,26 +75,24 @@ describe('разбор сообщения', () => {
 
 describe('готов купить', () => {
   const base = { query: '', intent: 'buy' as const, lang: 'ru' as const, article: '', model: '', size: '', gender: '', kind: '', season: '', color: '', maxPrice: null, city: '', delivery: '', payment: '' };
-  it('не хватает модели, размера и города — спросить разом', () => {
-    const o = draftOrder(base, catalog, null, source);
-    expect(o.missing).toEqual(['model', 'size', 'city']);
-    expect(orderQuestion(o)).toBe('Хорошо! Подскажите, пожалуйста, какую модель берёте (артикул или ссылку из каталога), какой размер и в какой город доставить или заберёте в магазине?');
+  it('вопрос о недостающем — по-русски и по-казахски', () => {
+    const o = draftOrder(base, catalog, null, source, emptyLead());
+    expect(o.missing).toEqual(['name', 'want', 'size', 'city', 'delivery', 'payment']);
+    expect(orderQuestion({ missing: ['size', 'city'], lang: 'ru' })).toBe('Хорошо! Подскажите, пожалуйста, какой размер и ваш город?');
     expect(orderQuestion({ missing: ['size'], lang: 'kk' })).toBe('Жақсы! Нақтылап жіберіңізші: қай размер?');
   });
   it('всё есть — сводка с наличием для менеджера', () => {
     const u = { ...base, article: 'Z-701', size: '42', city: 'Астана', delivery: 'Казпочта', payment: 'Kaspi' };
     const m = searchCatalog(catalog, { article: u.article, size: u.size });
-    const o = draftOrder(u, catalog, m, source);
+    const lead = mergeLead(emptyLead(), { ...leadFromUnderstanding(u), name: 'Айгерім', address: 'Кенесары 40' });
+    const o = draftOrder(u, catalog, m, source, lead);
     expect(o.missing).toEqual([]);
     expect(o.product).toBe('Зимние ботинки Арктика (арт. Z-701), размер 42');
     expect(o.amount).toBe(33900);
-    expect(o.comment).toBe('Астана · Казпочта · Kaspi');
+    expect(o.comment).toBe('Айгерім · Астана · Казпочта · Кенесары 40 · Kaspi');
+    expect(o.summary).toMatch(/^Имя: Айгерім\nЧто хочет: Зимние ботинки Арктика \(арт\. Z-701\)\nЦена: 33 900 ₸/);
     expect(o.summary).toMatch(/Наличие 42: Алматы, Розыбакиева 247 \(последняя пара\)/);
     expect(orderConfirmation('kk')).toMatch(/менеджерге/);
-  });
-  it('без склада размер не обязателен', () => {
-    const o = draftOrder({ ...base, model: 'чёрная сумка', delivery: 'заберу в магазине' }, null, null, null);
-    expect(o.missing).toEqual([]);
   });
 });
 

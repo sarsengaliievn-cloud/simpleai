@@ -595,6 +595,8 @@ model Deal {
   /// Товар: модель, размер, цвет — как менеджер записал.
   product        String?
   comment        String?
+  /// Заявка, которую бот собирает в переписке: имя, что хочет, размер, город, получение, адрес, оплата.
+  lead           Json?
   lostReason     String?
   /// Откуда пришёл клиент: whatsapp или ad (реклама «Написать в WhatsApp»).
   source         String    @default("whatsapp")

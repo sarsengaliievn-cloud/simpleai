@@ -1,9 +1,11 @@
 import type { TenantClient } from '@wa/db';
-import { ensureStages, sourceLabel } from '@wa/core';
+import { ensureStages, sourceLabel, leadLines, toLead } from '@wa/core';
 
 export type StageView = { id: string; name: string; kind: 'NEW' | 'WORK' | 'ORDER' | 'WON' | 'LOST'; aiHint?: string | null; aiAsk?: string | null };
 export type MemberView = { id: string; name: string };
 export type DealView = {
+  /** Заявка, которую собрал бот: «Имя: …», «Размер: …». */
+  lead: string[];
   id: string;
   stageId: string;
   amount: number | null;
@@ -66,6 +68,7 @@ export async function loadDeal(db: TenantClient, where: Record<string, unknown>)
     amount: deal.amount,
     product: deal.product,
     comment: deal.comment,
+    lead: leadLines(toLead(deal.lead)),
     lostReason: deal.lostReason,
     assigneeId: deal.assigneeId,
     assigneeName: fullName(deal.assignee),

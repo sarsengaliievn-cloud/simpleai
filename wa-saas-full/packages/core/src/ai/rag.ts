@@ -1,4 +1,5 @@
 import { searchChunks, type SearchHit } from '@wa/db';
+import { toLead, mergeLead, leadFromUnderstanding, leadMissing, leadStarted, leadNote, leadLines, type Lead, type LeadField } from '../lead.js';
 import { getAIFor, resolveAI, type AIChoice } from './factory.js';
 import { estimateTokens } from './chunk.js';
 import { buildSystemPrompt, type AIConfigLike } from './prompt.js';
@@ -33,9 +34,11 @@ export type AnswerResult = {
   partner?: { lang: 'ru' | 'kk' } | null;
   /** Возврат, обмен, брак — сразу менеджеру, без ответа бота. */
   managerOnly?: boolean;
+  /** Заявка на покупку после этого сообщения (с тем, что клиент сказал раньше) — сохранить в сделку. */
+  lead?: Lead;
 };
 
-export type OrderField = 'model' | 'size' | 'city';
+export type OrderField = LeadField;
 export type OrderDraft = {
   missing: OrderField[];
   lang: 'ru' | 'kk';
@@ -141,6 +144,8 @@ export async function answerQuestion(params: {
   orders?: string | null;
   /** Вопросы воронки: что спросить клиента после ответа (funnelAskBlock). */
   funnel?: string | null;
+  /** Заявка, собранная раньше (Deal.lead). */
+  lead?: unknown;
 }): Promise<AnswerResult> {
   const choice = resolveAI(params.config);
   const ai = getAIFor(choice);
@@ -236,16 +241,19 @@ export async function answerQuestion(params: {
     ? { mode: match?.mode ?? 'none', count: match?.items.length ?? 0, ...(catalogError ? { error: catalogError } : {}) }
     : null;
 
-  // ── 3. Готов купить — собрать заказ для менеджера ─────────
-  // Всё известно (модель, размер, город) — сразу менеджеру. Не хватает —
-  // сначала база знаний: там может быть ответ владельца на это самое
-  // сообщение («хочу по акции за 38 900» → подарки и «какой размер?»).
-  // Базе нечего сказать — уточняем недостающее сами.
-  const order = u?.intent === 'buy' ? draftOrder(u, catalog, match, params.catalog ?? null) : null;
+  // ── 3. Заявка: бот готовит продажу ──────────────────────
+  // Что клиент сказал сейчас — поверх того, что уже знали (хранится в
+  // сделке). Последний недостающий пункт пришёл в этом сообщении — заявка
+  // готова, сразу менеджеру. Иначе бот отвечает и спрашивает следующий пункт.
+  const stored = toLead(params.lead);
+  const lead = mergeLead(stored, leadFromUnderstanding(u));
+  const leadChanged = JSON.stringify(lead) !== JSON.stringify(stored);
+  const leadDone = leadChanged && leadStarted(lead) && leadMissing(lead).length === 0 && !managerOnly;
+  const order = leadDone && u ? draftOrder(u, catalog, match, params.catalog ?? null, lead) : null;
   const orderResult = (spent = { input: 0, output: 0, embed: 0 }): AnswerResult => ({
     answer: '', confidence: 100, modelConfidence: 100, topScore: 0, needsHuman: false, hits: [],
     usage: { inputTokens: inputTokens + spent.input, outputTokens: outputTokens + spent.output, embedTokens: spent.embed }, ai: choice,
-    understanding: u, catalog: catalogInfo, order,
+    understanding: u, catalog: catalogInfo, order, lead,
   });
   if (order && order.missing.length === 0) return orderResult();
 
@@ -282,11 +290,15 @@ export async function answerQuestion(params: {
   const ordersCtx = params.orders?.trim() && u?.intent !== 'buy' && ORDER_STATUS_Q.test(`${params.question}\n${query}`)
     ? params.orders.trim() : '';
 
-  // Хочет купить, а базе нечего сказать — уточняем модель, размер, город.
-  if (order && !managerOnly && relevant.length === 0 && !stock && !ordersCtx && !storesCtx) return orderResult({ input: 0, output: 0, embed: embedTokens });
+  // Бот готовит продажу: отвечает и спрашивает следующий пункт заявки.
+  // Не в разговоре о заказе, адресе магазина и возврате — там свой вопрос.
+  const selling = !managerOnly && !ordersCtx && !storesCtx;
+  const leadAsk = selling ? leadNote(lead) : '';
 
-  // Ни базы, ни склада — до модели даже не идём: дешевле и честнее.
-  if (relevant.length === 0 && !stock && !ordersCtx && !storesCtx) {
+  // Ни базы, ни склада — до модели даже не идём: дешевле и честнее. Если
+  // клиент только что дал данные для заявки («Айгерім, 38») — идём: нужно
+  // спросить следующий пункт, а не звать менеджера.
+  if (relevant.length === 0 && !stock && !ordersCtx && !storesCtx && !(leadAsk && leadChanged)) {
     return {
       answer: '',
       confidence: 0,
@@ -299,6 +311,7 @@ export async function answerQuestion(params: {
       understanding: u,
       catalog: catalogInfo,
       managerOnly,
+      lead,
     };
   }
 
@@ -327,11 +340,11 @@ export async function answerQuestion(params: {
       {
         role: 'user',
         content: `${context}\n\n---\n\n${dialogNote(history, params.question, clientLang(params.question.split('\n').at(-1) ?? params.question, u?.lang))}Вопрос клиента: ${params.question}${query !== params.question ? `\n(Смысл вопроса: ${query})` : ''}${
-          params.funnel && !managerOnly && !order && !storesCtx ? `\n\n${params.funnel}` : ''
+          params.funnel && !managerOnly && !leadAsk && !storesCtx ? `\n\n${params.funnel}` : ''
         }${
           managerOnly ? '\n(Это решает менеджер — возврат, обмен, брак или клиент сообщает, что оплатил. Коротко ответь: условия из базы знаний (для оплаты — поблагодари) и скажи, что менеджер сейчас проверит и подключится. Ничего не обещай и не подтверждай оплату сам. Нечего сказать по базе — needs_human = true.)' : ''
         }${
-          order ? `\n(Клиент хочет купить. Если в базе есть ответ на это — ответь по нему; в конце спроси, чего не хватает для заказа: ${order.missing.map((f) => ({ model: 'модель', size: 'размер', city: 'город или самовывоз' })[f]).join(', ')}.)` : ''
+          leadAsk ? `\n\n${leadAsk}` : ''
         }`,
       },
     ]),
@@ -342,7 +355,9 @@ export async function answerQuestion(params: {
   // Модель склонна завышать уверенность в себе, поэтому итог ограничиваем
   // качеством найденных фрагментов: нет опоры в базе — нет высокой оценки.
   // Ответ по данным склада опирается на каталог, а не на базу знаний.
-  const confidence = stock || ordersCtx || storesCtx ? parsed.confidence : Math.min(parsed.confidence, Math.round(topScore * 100));
+  // Клиент дал данные для заявки — ответ «спасибо, а какой размер?» опирается
+  // на заявку, а не на базу знаний.
+  const confidence = stock || ordersCtx || storesCtx || (leadAsk && leadChanged) ? parsed.confidence : Math.min(parsed.confidence, Math.round(topScore * 100));
 
   const photos = match?.mode === 'pick' && params.catalog?.photoUrl
     ? match.items.slice(0, 3).map((i) => ({
@@ -353,7 +368,7 @@ export async function answerQuestion(params: {
 
   const needsHuman = parsed.needsHuman || confidence < params.config.confidenceThreshold;
   // База не помогла — для покупателя лучше уточнить заказ, чем звать менеджера.
-  if (order && !managerOnly && (needsHuman || !parsed.answer)) return orderResult({ input: result.inputTokens, output: result.outputTokens, embed: embedTokens });
+  if (order && (needsHuman || !parsed.answer)) return orderResult({ input: result.inputTokens, output: result.outputTokens, embed: embedTokens });
 
   return {
     answer: parsed.answer,
@@ -368,6 +383,7 @@ export async function answerQuestion(params: {
     catalog: catalogInfo,
     photos,
     managerOnly,
+    lead,
   };
 }
 
@@ -392,29 +408,18 @@ export function dialogNote(history: ChatMessage[], question: string, lang?: 'ru'
 }
 
 /**
- * Заказ для менеджера из того, что клиент уже сказал. Без модели, размера
- * (если есть склад с размерами) и города или способа получения менеджеру
- * пришлось бы переспрашивать — этого не хватает в missing.
+ * Заказ для менеджера из собранной заявки: что клиент сказал, плюс цена,
+ * наличие размера по магазинам и ссылка, если модель нашлась на складе.
  */
-export function draftOrder(u: Understanding, catalog: Catalog | null, match: CatalogMatch | null, source: CatalogSource | null): OrderDraft {
+export function draftOrder(u: Understanding, catalog: Catalog | null, match: CatalogMatch | null, source: CatalogSource | null, lead: Lead): OrderDraft {
   const item = match?.mode === 'product' && match.items.length === 1 ? match.items[0]! : null;
-  const size = u.size ? u.size.replace(',', '.').match(/\d{1,2}(?:\.5)?/)?.[0] ?? u.size : '';
-  const modelText = item ? `${item.name}${item.article ? ` (арт. ${item.article})` : ''}` : u.article ? `арт. ${u.article}${u.model ? `, ${u.model}` : ''}` : u.model;
-
-  const missing: OrderField[] = [];
-  if (!modelText) missing.push('model');
-  const sized = item ? item.sizes.length > 0 : !!catalog;
-  if (sized && !size) missing.push('size');
-  if (!u.city && !u.delivery) missing.push('city');
+  const size = lead.size;
+  const modelText = item ? `${item.name}${item.article ? ` (арт. ${item.article})` : ''}` : lead.want;
 
   const product = [modelText, size ? `размер ${size}` : ''].filter(Boolean).join(', ');
-  const comment = [u.city, u.delivery, u.payment].filter(Boolean).join(' · ');
-  const lines = [
-    `Модель: ${modelText || 'не назвал'}${size ? `, размер ${size}` : ''}${item ? ` — ${new Intl.NumberFormat('ru-RU').format(item.price).replace(/[\u00a0\u202f]/g, ' ')} ₸` : ''}`,
-    u.city ? `Город: ${u.city}` : '',
-    u.delivery ? `Получение: ${u.delivery}` : '',
-    u.payment ? `Оплата: ${u.payment}` : '',
-  ];
+  const comment = [lead.name, lead.city, lead.delivery, lead.address, lead.payment].filter(Boolean).join(' · ');
+  const lines = leadLines({ ...lead, want: modelText });
+  if (item) lines.splice(2, 0, `Цена: ${new Intl.NumberFormat('ru-RU').format(item.price).replace(/[\u00a0\u202f]/g, ' ')} ₸`);
   if (item && size && catalog) {
     const { here, order } = sizeAvailability(catalog, item, size);
     lines.push(here.length ? `Наличие ${size}: ${here.join('; ')}` : order.length ? `Наличие ${size}: только на складе, под заказ` : `Наличие ${size}: нет ни в одном магазине`);
@@ -424,7 +429,7 @@ export function draftOrder(u: Understanding, catalog: Catalog | null, match: Cat
     if (link) lines.push(link);
   }
   return {
-    missing,
+    missing: leadMissing(lead),
     lang: u.lang,
     summary: lines.filter(Boolean).join('\n'),
     product,
@@ -434,8 +439,8 @@ export function draftOrder(u: Understanding, catalog: Catalog | null, match: Cat
 }
 
 const ASK: Record<'ru' | 'kk', Record<OrderField, string>> = {
-  ru: { model: 'какую модель берёте (артикул или ссылку из каталога)', size: 'какой размер', city: 'в какой город доставить или заберёте в магазине' },
-  kk: { model: 'қай модельді аласыз (артикул немесе каталогтағы сілтеме)', size: 'қай размер', city: 'қай қалаға жеткізу керек, әлде дүкеннен аласыз ба' },
+  ru: { name: 'как вас зовут', want: 'какую модель хотите', size: 'какой размер', city: 'ваш город', delivery: 'доставка или заберёте в магазине', address: 'адрес доставки', payment: 'как удобнее оплатить' },
+  kk: { name: 'атыңыз кім', want: 'қай модель керек', size: 'қай размер', city: 'қай қаладансыз', delivery: 'жеткізу ме, әлде дүкеннен аласыз ба', address: 'жеткізу мекенжайы', payment: 'қалай төлейсіз' },
 };
 
 /** «Хорошо! Подскажите, пожалуйста: какой размер и в какой город доставить…» */

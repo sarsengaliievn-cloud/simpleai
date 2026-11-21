@@ -21,8 +21,9 @@ import {
   type AiReplyJob,
   aiErrorReason,
   autoAssignConversation,
-  orderQuestion,
   orderConfirmation,
+  moveLeadReady,
+  leadStarted,
   partnerReply,
   sendWhatsAppMedia,
   assertPublicUrl,
@@ -174,7 +175,18 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
   // Воронка: после ответа бот задаёт вопрос, который двигает клиента дальше
   // («Придёте в магазин?»), а ИИ-этапы потом ставят сделку по его ответу.
   const funnel = company.aiStages ? funnelAskBlock(await db.pipelineStage.findMany({ orderBy: { position: 'asc' } }), company.orderStageMap) : null;
-  const result = await answerQuestion({ companyId, company, config, question, history, catalog, orders, funnel });
+  // Открытая сделка клиента: в ней заявка, которую бот уже собрал раньше.
+  const openDeal = await db.deal.findFirst({
+    where: { conversationId, archivedAt: null, stage: { kind: { notIn: ['WON', 'LOST'] } } },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, lead: true },
+  });
+  const result = await answerQuestion({ companyId, company, config, question, history, catalog, orders, funnel, lead: openDeal?.lead });
+  // Что клиент сказал для заявки — в сделку сразу: даже если ответит
+  // следующая задача, она продолжит с этого места.
+  if (openDeal && result.lead && leadStarted(result.lead) && JSON.stringify(result.lead) !== JSON.stringify(openDeal.lead ?? null)) {
+    await db.deal.updateMany({ where: { id: openDeal.id }, data: { lead: result.lead } });
+  }
   // ИИ снова отвечает — плашка «ИИ не работает» больше не нужна.
   if (config.lastErrorAt) {
     await db.aIConfiguration.updateMany({ data: { lastErrorAt: null, lastError: null } });
@@ -214,7 +226,7 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
 
   // ── Клиент готов купить ────────────────────
   if (result.order) {
-    await handleOrder(db, { conversationId, result, after, lastProviderMessageId: last.providerMessageId, phoneNumberRowId: conversation.phoneNumber?.id ?? null });
+    await handleOrder(db, { conversationId, result, after, lastProviderMessageId: last.providerMessageId, phoneNumberRowId: conversation.phoneNumber?.id ?? null, orderStageMap: company.orderStageMap });
     return;
   }
 
@@ -288,52 +300,31 @@ export async function generateAiReply({ companyId, conversationId, inboundMessag
   console.log(`[ai] ${conversationId}: ответ отправлен (${result.confidence}%, частей ${sentCount}/${parts.length})`);
 }
 
-/** Сколько ждём, пока клиент ответит на уточнение заказа, прежде чем спросить снова. */
-const ORDER_ASK_MS = 2 * 60 * 60 * 1000;
-
 /**
- * Клиент сказал «беру». Не хватает модели, размера или города — бот один
- * раз переспрашивает. Всё есть (или уже спрашивали) — короткое «передаю
- * менеджеру» клиенту, а менеджеру сводка: модель, размер, город, наличие.
+ * Бот собрал заявку: имя, модель, размер, город, получение, оплата.
+ * Клиенту — «передаю менеджеру», в сделку — товар, сумма, заявка, этап
+ * «Ждем оплату»; менеджеру — готовая сводка с наличием по магазинам.
  * Резерв бот не ставит — это решает менеджер.
  */
 async function handleOrder(
   db: Db,
-  input: { conversationId: string; result: AnswerResult; after: Date; lastProviderMessageId: string | null; phoneNumberRowId: string | null },
+  input: { conversationId: string; result: AnswerResult; after: Date; lastProviderMessageId: string | null; phoneNumberRowId: string | null; orderStageMap: unknown },
 ) {
   const { conversationId, result } = input;
   const order = result.order!;
-  const markRead = async () => {
-    if (input.lastProviderMessageId && input.phoneNumberRowId) {
-      await markWhatsAppRead(db, { phoneNumberRowId: input.phoneNumberRowId, providerMessageId: input.lastProviderMessageId });
-    }
-  };
-
-  if (order.missing.length) {
-    const asked = await db.message.findFirst({
-      where: { conversationId, authorType: 'AI', createdAt: { gte: new Date(Date.now() - ORDER_ASK_MS) }, metadata: { path: ['orderAsk'], equals: true } },
-      select: { id: true },
-    });
-    if (!asked) {
-      const outcome = await sendAsAssistant(db, conversationId, orderQuestion(order), { orderAsk: true, missing: order.missing }, input.after);
-      if (outcome === 'sent') {
-        await markRead();
-        console.log(`[ai] ${conversationId}: готов купить — уточняю ${order.missing.join(', ')}`);
-        return;
-      }
-      if (outcome === 'skipped') return;
-    }
-  }
 
   const outcome = await sendAsAssistant(db, conversationId, orderConfirmation(order.lang), { orderConfirm: true }, input.after);
   if (outcome === 'skipped' && (await newerInbound(db, conversationId, input.after))) return;
-  if (outcome === 'sent') await markRead();
+  if (outcome === 'sent' && input.lastProviderMessageId && input.phoneNumberRowId) {
+    await markWhatsAppRead(db, { phoneNumberRowId: input.phoneNumberRowId, providerMessageId: input.lastProviderMessageId });
+  }
 
   // В сделку — что выбрал клиент; сумму и товар менеджер поправит при оформлении.
   const deal = await db.deal.findFirst({
     where: { conversationId, archivedAt: null, stage: { kind: { notIn: ['WON', 'LOST'] } } },
     orderBy: { createdAt: 'desc' },
   });
+  let moved = false;
   if (deal) {
     await db.deal.updateMany({
       where: { id: deal.id },
@@ -344,15 +335,18 @@ async function handleOrder(
       },
     });
     await db.dealEvent.create({
-      data: { dealId: deal.id, type: 'note', text: `Бот: клиент готов купить.\n${order.summary}` } as never,
+      data: { dealId: deal.id, type: 'note', text: `Бот собрал заявку.\n${order.summary}` } as never,
+    });
+    moved = await moveLeadReady(db, deal.id, input.orderStageMap).catch((e) => {
+      console.warn(`[ai] ${conversationId}: этап «Ждем оплату» не поставлен:`, e);
+      return false;
     });
   }
 
-  const missingNote = order.missing.length ? `\nНе уточнил: ${order.missing.map((f) => ({ model: 'модель', size: 'размер', city: 'город или способ получения' })[f]).join(', ')}.` : '';
-  await handOff(db, conversationId, `🛒 Клиент готов купить — диалог передан менеджеру.\n${order.summary}${missingNote}`, {
-    order: { summary: order.summary, product: order.product, amount: order.amount, comment: order.comment, missing: order.missing },
+  await handOff(db, conversationId, `🛒 Заявка собрана — клиент готов купить, диалог передан менеджеру.\n${order.summary}`, {
+    order: { summary: order.summary, product: order.product, amount: order.amount, comment: order.comment },
   });
-  console.log(`[ai] ${conversationId}: готов купить — передано менеджеру`);
+  console.log(`[ai] ${conversationId}: заявка собрана — передано менеджеру${moved ? ', этап «Ждем оплату»' : ''}`);
 }
 
 /** Фото моделей из каталога: скачиваем со склада и отправляем с подписью. Сбой фото — не повод звать менеджера. */

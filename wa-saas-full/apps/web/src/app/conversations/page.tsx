@@ -1,4 +1,5 @@
 import { ShopOrdersCard } from '@/components/crm/ShopOrdersCard';
+import { LeadCard } from '@/components/crm/LeadCard';
 import Link from 'next/link';
 import { can, lostReasonsOf } from '@wa/core';
 import { loadThread } from '@/lib/thread';
@@ -151,6 +152,7 @@ export default async function ConversationsPage({ searchParams }: Props) {
             ) : (
               <StartDeal conversationId={active.conversation.id} />
             )}
+            {deal && <LeadCard lines={deal.lead} />}
             <ShopOrdersCard orders={shopOrders} />
           </aside>
         )}

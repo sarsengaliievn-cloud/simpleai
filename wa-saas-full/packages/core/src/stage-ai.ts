@@ -295,3 +295,26 @@ async function moveSilentToLost(prisma: PrismaClient, now: Date) {
   return moved;
 }
 
+
+/**
+ * Бот собрал заявку — сделку на «Ждем оплату» (тот же этап, куда склад
+ * ставит новый заказ). Только вперёд и не поверх ручного выбора менеджера.
+ */
+export async function moveLeadReady(db: ReturnType<typeof forCompany>, dealId: string, orderStageMap?: unknown) {
+  const [deal, stages] = await Promise.all([
+    db.deal.findFirst({ where: { id: dealId }, select: { id: true, stageId: true, manualStageAt: true } }),
+    db.pipelineStage.findMany({ orderBy: { position: 'asc' } }),
+  ]);
+  const targetId = resolveStageMap(stages, orderStageMap).draft;
+  const current = stages.find((s) => s.id === deal?.stageId);
+  const target = stages.find((s) => s.id === targetId);
+  if (!deal || !current || !target) return false;
+  if (!aiMoveAllowed(current, { ...target, hint: '' }, skladStageIds(stages, orderStageMap), deal.manualStageAt)) return false;
+  try {
+    await moveDeal(db, { dealId, stageId: target.id, aiReason: 'бот собрал заявку: имя, модель, размер, город, получение, оплата' });
+    return true;
+  } catch (e) {
+    if (e instanceof CrmError) return false;
+    throw e;
+  }
+}
